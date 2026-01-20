@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:vad_plus/vad_plus.dart' as vad_plus;
 
 void main() {
@@ -31,9 +31,7 @@ class _MyAppState extends State<MyApp> {
     const spacerSmall = SizedBox(height: 10);
     return MaterialApp(
       home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Native Packages'),
-        ),
+        appBar: AppBar(title: const Text('Native Packages')),
         body: SingleChildScrollView(
           child: Container(
             padding: const .all(10),
@@ -46,22 +44,13 @@ class _MyAppState extends State<MyApp> {
                   textAlign: .center,
                 ),
                 spacerSmall,
-                Text(
-                  'sum(1, 2) = $sumResult',
-                  style: textStyle,
-                  textAlign: .center,
-                ),
+                Text('sum(1, 2) = $sumResult', style: textStyle, textAlign: .center),
                 spacerSmall,
                 FutureBuilder<int>(
                   future: sumAsyncResult,
                   builder: (BuildContext context, AsyncSnapshot<int> value) {
-                    final displayValue =
-                        (value.hasData) ? value.data : 'loading';
-                    return Text(
-                      'await sumAsync(3, 4) = $displayValue',
-                      style: textStyle,
-                      textAlign: .center,
-                    );
+                    final displayValue = (value.hasData) ? value.data : 'loading';
+                    return Text('await sumAsync(3, 4) = $displayValue', style: textStyle, textAlign: .center);
                   },
                 ),
               ],
