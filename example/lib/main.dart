@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:developer';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vad_plus/vad_plus.dart';
@@ -49,7 +51,6 @@ class _MyAppState extends State<MyApp> {
       // Initialize with default v6 16kHz configuration
       await _vad!.initialize(
         config: const VadConfig(isDebug: true, positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35),
-        
       );
 
       setState(() {
@@ -69,14 +70,16 @@ class _MyAppState extends State<MyApp> {
   Future<void> _startListening() async {
     if (!_isInitialized || _vad == null) return;
 
-    // Request microphone permission
-    final status = await Permission.microphone.request();
-    if (!status.isGranted) {
-      setState(() {
-        _statusMessage = 'Microphone permission denied';
-        _addLog('❌ Microphone permission denied');
-      });
-      return;
+    // Request microphone permission (not supported on macOS - permission is requested automatically)
+    if (!kIsWeb && !Platform.isMacOS) {
+      final status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        setState(() {
+          _statusMessage = 'Microphone permission denied';
+          _addLog('❌ Microphone permission denied');
+        });
+        return;
+      }
     }
 
     try {

@@ -104,7 +104,7 @@ class VADHandleInternal {
         resetStates()
         
         // Initialize ONNX Runtime
-        ortEnv = try ORTEnv(loggingLevel: config.isDebug ? .verbose : .warning)
+        ortEnv = try ORTEnv(loggingLevel: config.isDebug ? .verbose : .error)
         
         // Find model path
         let finalModelPath: String
@@ -119,6 +119,7 @@ class VADHandleInternal {
         
         let sessionOptions = try ORTSessionOptions()
         try sessionOptions.setGraphOptimizationLevel(.all)
+        try sessionOptions.setLogSeverityLevel(config.isDebug ? .verbose : .error)
         
         ortSession = try ORTSession(env: ortEnv!, modelPath: finalModelPath, sessionOptions: sessionOptions)
         
