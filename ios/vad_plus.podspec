@@ -17,8 +17,8 @@ Provides real-time speech detection with configurable thresholds and callbacks.
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
   
-  # Include the ONNX model file
-  s.resources        = ['../onnx/*.onnx']
+  # Include the ONNX model file as a resource bundle
+  s.resource_bundles = { 'vad_plus_assets' => ['Resources/*.onnx'] }
   
   s.dependency 'Flutter'
   s.dependency 'onnxruntime-objc', '~> 1.18.0'

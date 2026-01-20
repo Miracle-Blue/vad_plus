@@ -204,11 +204,19 @@ class VADHandleInternal {
             }
         }
         
-        // Try Frameworks directory (iOS app structure)
+        // Try Frameworks directory (macOS/iOS app structure)
+        #if os(macOS)
+        let frameworkPaths = [
+            "Contents/Frameworks/vad_plus.framework/Resources",
+            "Contents/Frameworks/vad_plus.framework/Versions/A/Resources",
+            "Contents/Resources"
+        ]
+        #else
         let frameworkPaths = [
             "Frameworks/vad_plus.framework",
             "Frameworks/App.framework/flutter_assets/packages/vad_plus/onnx"
         ]
+        #endif
         
         for frameworkPath in frameworkPaths {
             for name in modelNames {

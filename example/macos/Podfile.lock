@@ -1,0 +1,41 @@
+PODS:
+  - flutter_soloud (0.0.1):
+    - FlutterMacOS
+  - FlutterMacOS (1.0.0)
+  - onnxruntime-c (1.18.0)
+  - onnxruntime-objc (1.18.0):
+    - onnxruntime-objc/Core (= 1.18.0)
+  - onnxruntime-objc/Core (1.18.0):
+    - onnxruntime-c (= 1.18.0)
+  - vad_plus (0.0.1):
+    - FlutterMacOS
+    - onnxruntime-objc (~> 1.18.0)
+
+DEPENDENCIES:
+  - flutter_soloud (from `Flutter/ephemeral/.symlinks/plugins/flutter_soloud/macos`)
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - vad_plus (from `Flutter/ephemeral/.symlinks/plugins/vad_plus/macos`)
+
+SPEC REPOS:
+  trunk:
+    - onnxruntime-c
+    - onnxruntime-objc
+
+EXTERNAL SOURCES:
+  flutter_soloud:
+    :path: Flutter/ephemeral/.symlinks/plugins/flutter_soloud/macos
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  vad_plus:
+    :path: Flutter/ephemeral/.symlinks/plugins/vad_plus/macos
+
+SPEC CHECKSUMS:
+  flutter_soloud: 93c20641a100d25bfbc84a8b86e867f350ef29ac
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  onnxruntime-c: a909204639a1f035f575127ac406f781ac797c9c
+  onnxruntime-objc: b6fab0f1787aa6f7190c2013f03037df4718bd8b
+  vad_plus: 856fc2a07176c4ffafa588156592a38795d6461d
+
+PODFILE CHECKSUM: ba845a7a65fdaff090a632b1b7063d1db34b29e3
+
+COCOAPODS: 1.16.2

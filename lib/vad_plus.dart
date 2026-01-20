@@ -489,7 +489,9 @@ const String _libName = 'vad_plus';
 /// The dynamic library in which the symbols for [VadPlusBindings] can be found.
 final DynamicLibrary _dylib = () {
   if (Platform.isMacOS || Platform.isIOS) {
-    return DynamicLibrary.open('$_libName.framework/$_libName');
+    // On iOS/macOS, the Swift FFI functions are statically linked into
+    // the main app binary, so we use process() to look up symbols.
+    return DynamicLibrary.process();
   }
   if (Platform.isAndroid || Platform.isLinux) {
     return DynamicLibrary.open('lib$_libName.so');

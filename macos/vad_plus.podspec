@@ -5,30 +5,36 @@
 Pod::Spec.new do |s|
   s.name             = 'vad_plus'
   s.version          = '0.0.1'
-  s.summary          = 'A new Flutter FFI plugin project.'
+  s.summary          = 'Silero VAD ONNX voice activity detection FFI plugin.'
   s.description      = <<-DESC
-A new Flutter FFI plugin project.
+A Flutter FFI plugin for voice activity detection using Silero VAD ONNX model.
+Provides real-time speech detection with configurable thresholds and callbacks.
                        DESC
   s.homepage         = 'http://example.com'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
 
-  # This will ensure the source files in Classes/ are included in the native
-  # builds of apps using this FFI plugin. Podspec does not support relative
-  # paths, so Classes contains a forwarder C file that relatively imports
-  # `../src/*` so that the C sources can be shared among all target platforms.
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
-
-  # If your plugin requires a privacy manifest, for example if it collects user
-  # data, update the PrivacyInfo.xcprivacy file to describe your plugin's
-  # privacy impact, and then uncomment this line. For more information,
-  # see https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
-  # s.resource_bundles = {'vad_plus_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
+  s.source_files     = 'Classes/**/*'
+  
+  # Include the ONNX model file as a resource bundle
+  s.resource_bundles = { 'vad_plus_assets' => ['Resources/*.onnx'] }
 
   s.dependency 'FlutterMacOS'
+  s.dependency 'onnxruntime-objc', '~> 1.18.0'
 
-  s.platform = :osx, '13.3'
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
+  s.platform = :osx, '13.4'
+  s.static_framework = true
+
+  # Enable modules and proper build settings
+  s.pod_target_xcconfig = {
+    'DEFINES_MODULE' => 'YES',
+    'CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES' => 'YES',
+    'OTHER_SWIFT_FLAGS' => '-enable-experimental-feature Extern'
+  }
+
   s.swift_version = '5.0'
+
+  # Required for ONNX Runtime
+  s.frameworks = 'Accelerate', 'AVFoundation'
 end

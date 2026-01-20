@@ -49,6 +49,7 @@ class _MyAppState extends State<MyApp> {
       // Initialize with default v6 16kHz configuration
       await _vad!.initialize(
         config: const VadConfig(isDebug: true, positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35),
+        
       );
 
       setState(() {
