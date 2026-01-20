@@ -24,6 +24,7 @@ Provides real-time speech detection with configurable thresholds and callbacks.
   s.dependency 'onnxruntime-objc', '~> 1.18.0'
   
   s.platform = :ios, '15.0'
+  s.static_framework = true
 
   # Enable modules and proper build settings
   s.pod_target_xcconfig = {

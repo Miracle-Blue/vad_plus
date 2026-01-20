@@ -28,19 +28,19 @@
 
 static const char *stub_error = "VAD not supported on this platform";
 
-FFI_PLUGIN_EXPORT VADConfig vad_config_default(void)
+FFI_PLUGIN_EXPORT void vad_config_default(VADConfig *config_out)
 {
-  VADConfig config = {
-      .positive_speech_threshold = 0.5f,
-      .negative_speech_threshold = 0.35f,
-      .pre_speech_pad_frames = 3,
-      .redemption_frames = 24,
-      .min_speech_frames = 9,
-      .sample_rate = 16000,
-      .frame_samples = 512,
-      .end_speech_pad_frames = 3,
-      .is_debug = false};
-  return config;
+  if (config_out == NULL)
+    return;
+  config_out->positive_speech_threshold = 0.5f;
+  config_out->negative_speech_threshold = 0.35f;
+  config_out->pre_speech_pad_frames = 3;
+  config_out->redemption_frames = 24;
+  config_out->min_speech_frames = 9;
+  config_out->sample_rate = 16000;
+  config_out->frame_samples = 512;
+  config_out->end_speech_pad_frames = 3;
+  config_out->is_debug = 0;
 }
 
 FFI_PLUGIN_EXPORT VADHandle *vad_create(void)
@@ -54,7 +54,7 @@ FFI_PLUGIN_EXPORT void vad_destroy(VADHandle *handle)
   (void)handle;
 }
 
-FFI_PLUGIN_EXPORT int32_t vad_init(VADHandle *handle, VADConfig config, const char *model_path)
+FFI_PLUGIN_EXPORT int32_t vad_init(VADHandle *handle, const VADConfig *config, const char *model_path)
 {
   (void)handle;
   (void)config;
@@ -98,10 +98,10 @@ FFI_PLUGIN_EXPORT void vad_force_end_speech(VADHandle *handle)
   (void)handle;
 }
 
-FFI_PLUGIN_EXPORT bool vad_is_speaking(VADHandle *handle)
+FFI_PLUGIN_EXPORT int32_t vad_is_speaking(VADHandle *handle)
 {
   (void)handle;
-  return false;
+  return 0;
 }
 
 FFI_PLUGIN_EXPORT const char *vad_get_last_error(VADHandle *handle)

@@ -63,8 +63,8 @@ class VADHandleInternal {
     // Audio engine for microphone capture
     var audioEngine: AVAudioEngine?
     
-    // Callback
-    var callback: (@convention(c) (VADEventCStruct, UnsafeMutableRawPointer?) -> Void)?
+    // Callback - using UnsafeRawPointer for C compatibility (Swift structs aren't directly C-representable)
+    var callback: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void)?
     var userData: UnsafeMutableRawPointer?
     
     // Last error
@@ -406,7 +406,8 @@ class VADHandleInternal {
         }
     }
     
-    private func emitSpeechEnd() {
+    // fileprivate to allow access from vad_force_end_speech FFI function
+    fileprivate func emitSpeechEnd() {
         let endPadSamples = Int(config.endSpeechPadFrames) * Int(config.frameSamples)
         let totalSamples = speechBuffer.count
         let keepSamples = max(0, totalSamples - endPadSamples)
@@ -432,7 +433,9 @@ class VADHandleInternal {
         event.type = type.rawValue
         
         DispatchQueue.main.async { [weak self] in
-            callback(event, self?.userData)
+            withUnsafePointer(to: &event) { ptr in
+                callback(UnsafeRawPointer(ptr), self?.userData)
+            }
         }
     }
     
@@ -442,12 +445,14 @@ class VADHandleInternal {
         var event = VADEventCStruct()
         event.type = VADEventTypeInternal.frameProcessed.rawValue
         event.frame_probability = probability
-        event.frame_is_speech = isSpeech
+        event.frame_is_speech = isSpeech ? 1 : 0
         event.frame_length = Int32(frame.count)
         // Note: frame_data pointer not set here as it would be invalid after this scope
         
         DispatchQueue.main.async { [weak self] in
-            callback(event, self?.userData)
+            withUnsafePointer(to: &event) { ptr in
+                callback(UnsafeRawPointer(ptr), self?.userData)
+            }
         }
     }
     
@@ -459,10 +464,12 @@ class VADHandleInternal {
         event.speech_end_audio_length = audioLength
         event.speech_end_duration_ms = durationMs
         
-        storedSpeechEndPCM16.withUnsafeBufferPointer { ptr in
-            event.speech_end_audio_data = ptr.baseAddress
+        storedSpeechEndPCM16.withUnsafeBufferPointer { audioPtr in
+            event.speech_end_audio_data = audioPtr.baseAddress
             DispatchQueue.main.async { [weak self] in
-                callback(event, self?.userData)
+                withUnsafePointer(to: &event) { eventPtr in
+                    callback(UnsafeRawPointer(eventPtr), self?.userData)
+                }
             }
         }
     }
@@ -477,7 +484,9 @@ class VADHandleInternal {
         message.withCString { cstr in
             event.error_message = cstr
             DispatchQueue.main.async { [weak self] in
-                callback(event, self?.userData)
+                withUnsafePointer(to: &event) { ptr in
+                    callback(UnsafeRawPointer(ptr), self?.userData)
+                }
             }
         }
     }
@@ -486,23 +495,26 @@ class VADHandleInternal {
 // MARK: - C-Compatible Event Structure
 
 /// Flat C-compatible event structure (easier for FFI than nested unions)
-struct VADEventCStruct {
-    var type: Int32 = 0
+/// Note: Using Int32 instead of Bool for C compatibility with @convention(c)
+public struct VADEventCStruct {
+    public var type: Int32 = 0
     
     // Frame data
-    var frame_probability: Float = 0
-    var frame_is_speech: Bool = false
-    var frame_data: UnsafePointer<Float>? = nil
-    var frame_length: Int32 = 0
+    public var frame_probability: Float = 0
+    public var frame_is_speech: Int32 = 0  // 0 = false, 1 = true (Bool not C-compatible)
+    public var frame_data: UnsafePointer<Float>? = nil
+    public var frame_length: Int32 = 0
     
     // Speech end data
-    var speech_end_audio_data: UnsafePointer<Int16>? = nil
-    var speech_end_audio_length: Int32 = 0
-    var speech_end_duration_ms: Int32 = 0
+    public var speech_end_audio_data: UnsafePointer<Int16>? = nil
+    public var speech_end_audio_length: Int32 = 0
+    public var speech_end_duration_ms: Int32 = 0
     
     // Error data
-    var error_message: UnsafePointer<CChar>? = nil
-    var error_code: Int32 = 0
+    public var error_message: UnsafePointer<CChar>? = nil
+    public var error_code: Int32 = 0
+    
+    public init() {}
 }
 
 // MARK: - Global Handle Storage
@@ -537,8 +549,10 @@ private func removeHandle(_ ptr: UnsafeMutableRawPointer?) {
 // MARK: - FFI Exports (C-compatible functions)
 
 @_cdecl("vad_config_default")
-public func vad_config_default() -> VADConfigC {
-    return VADConfigC(
+public func vad_config_default(_ configOut: UnsafeMutableRawPointer?) {
+    guard let configOut = configOut else { return }
+    let configPtr = configOut.assumingMemoryBound(to: VADConfigC.self)
+    configPtr.pointee = VADConfigC(
         positive_speech_threshold: 0.5,
         negative_speech_threshold: 0.35,
         pre_speech_pad_frames: 3,
@@ -547,7 +561,7 @@ public func vad_config_default() -> VADConfigC {
         sample_rate: 16000,
         frame_samples: 512,
         end_speech_pad_frames: 3,
-        is_debug: false
+        is_debug: 0
     )
 }
 
@@ -566,8 +580,10 @@ public func vad_destroy(_ handle: UnsafeMutableRawPointer?) {
 }
 
 @_cdecl("vad_init")
-public func vad_init(_ handle: UnsafeMutableRawPointer?, _ config: VADConfigC, _ modelPath: UnsafePointer<CChar>?) -> Int32 {
-    guard let h = getHandle(handle) else { return -1 }
+public func vad_init(_ handle: UnsafeMutableRawPointer?, _ configPtr: UnsafeRawPointer?, _ modelPath: UnsafePointer<CChar>?) -> Int32 {
+    guard let h = getHandle(handle), let configPtr = configPtr else { return -1 }
+    
+    let config = configPtr.assumingMemoryBound(to: VADConfigC.self).pointee
     
     let internalConfig = VADConfigInternal(
         positiveSpeechThreshold: config.positive_speech_threshold,
@@ -578,7 +594,7 @@ public func vad_init(_ handle: UnsafeMutableRawPointer?, _ config: VADConfigC, _
         sampleRate: config.sample_rate,
         frameSamples: config.frame_samples,
         endSpeechPadFrames: config.end_speech_pad_frames,
-        isDebug: config.is_debug
+        isDebug: config.is_debug != 0
     )
     
     let pathStr: String? = modelPath != nil ? String(cString: modelPath!) : nil
@@ -595,7 +611,7 @@ public func vad_init(_ handle: UnsafeMutableRawPointer?, _ config: VADConfigC, _
 @_cdecl("vad_set_callback")
 public func vad_set_callback(
     _ handle: UnsafeMutableRawPointer?,
-    _ callback: (@convention(c) (VADEventCStruct, UnsafeMutableRawPointer?) -> Void)?,
+    _ callback: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void)?,
     _ userData: UnsafeMutableRawPointer?
 ) {
     guard let h = getHandle(handle) else { return }
@@ -653,9 +669,9 @@ public func vad_force_end_speech(_ handle: UnsafeMutableRawPointer?) {
 }
 
 @_cdecl("vad_is_speaking")
-public func vad_is_speaking(_ handle: UnsafeMutableRawPointer?) -> Bool {
-    guard let h = getHandle(handle) else { return false }
-    return h.isSpeaking
+public func vad_is_speaking(_ handle: UnsafeMutableRawPointer?) -> Int32 {
+    guard let h = getHandle(handle) else { return 0 }
+    return h.isSpeaking ? 1 : 0
 }
 
 @_cdecl("vad_get_last_error")
@@ -684,6 +700,7 @@ public func vad_pcm16_to_float(_ pcm16Samples: UnsafePointer<Int16>?, _ floatSam
 }
 
 // MARK: - C-Compatible Config Structure
+/// Note: Using Int32 instead of Bool for C compatibility with @_cdecl
 
 public struct VADConfigC {
     public var positive_speech_threshold: Float
@@ -694,7 +711,7 @@ public struct VADConfigC {
     public var sample_rate: Int32
     public var frame_samples: Int32
     public var end_speech_pad_frames: Int32
-    public var is_debug: Bool
+    public var is_debug: Int32  // 0 = false, 1 = true (Bool not C-compatible)
     
     public init(
         positive_speech_threshold: Float = 0.5,
@@ -705,7 +722,7 @@ public struct VADConfigC {
         sample_rate: Int32 = 16000,
         frame_samples: Int32 = 512,
         end_speech_pad_frames: Int32 = 3,
-        is_debug: Bool = false
+        is_debug: Int32 = 0
     ) {
         self.positive_speech_threshold = positive_speech_threshold
         self.negative_speech_threshold = negative_speech_threshold
@@ -719,37 +736,3 @@ public struct VADConfigC {
     }
 }
 
-// Make emitSpeechEnd accessible for force_end_speech
-extension VADHandleInternal {
-    func emitSpeechEnd() {
-        let endPadSamples = Int(config.endSpeechPadFrames) * Int(config.frameSamples)
-        let totalSamples = speechBuffer.count
-        let keepSamples = max(0, totalSamples - endPadSamples)
-        let finalBuffer = Array(speechBuffer.prefix(keepSamples + endPadSamples))
-        
-        storedSpeechEndPCM16 = finalBuffer.map { sample in
-            let clamped = max(-1.0, min(1.0, sample))
-            return Int16(clamped * 32767)
-        }
-        
-        let durationMs = Int32(Double(finalBuffer.count) / Double(config.sampleRate) * 1000)
-        
-        sendSpeechEndEvent(audioLength: Int32(storedSpeechEndPCM16.count), durationMs: durationMs)
-    }
-    
-    fileprivate func sendSpeechEndEvent(audioLength: Int32, durationMs: Int32) {
-        guard let callback = callback else { return }
-        
-        var event = VADEventCStruct()
-        event.type = VADEventTypeInternal.speechEnd.rawValue
-        event.speech_end_audio_length = audioLength
-        event.speech_end_duration_ms = durationMs
-        
-        storedSpeechEndPCM16.withUnsafeBufferPointer { ptr in
-            event.speech_end_audio_data = ptr.baseAddress
-            DispatchQueue.main.async { [weak self] in
-                callback(event, self?.userData)
-            }
-        }
-    }
-}

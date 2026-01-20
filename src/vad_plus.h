@@ -38,8 +38,8 @@ typedef struct VADConfig
     int32_t frame_samples;
     /// Number of padding frames after speech end (default: 3 for v6)
     int32_t end_speech_pad_frames;
-    /// Enable debug logging
-    bool is_debug;
+    /// Enable debug logging (0 = false, 1 = true, using int32_t for FFI compatibility)
+    int32_t is_debug;
 } VADConfig;
 
 // ============================================================================
@@ -68,8 +68,8 @@ typedef struct VADFrameData
 {
     /// Speech probability (0.0 - 1.0)
     float probability;
-    /// Whether current frame is speech
-    bool is_speech;
+    /// Whether current frame is speech (0 = false, 1 = true)
+    int32_t is_speech;
     /// Pointer to frame audio data (float32)
     const float *frame_data;
     /// Number of samples in frame
@@ -116,7 +116,8 @@ typedef struct VADEvent
 // ============================================================================
 
 /// Callback function type for VAD events
-typedef void (*VADEventCallback)(VADEvent event, void *user_data);
+/// Note: Event is passed by pointer for C/Swift FFI compatibility
+typedef void (*VADEventCallback)(const VADEvent *event, void *user_data);
 
 // ============================================================================
 // Opaque Handle
@@ -130,8 +131,8 @@ typedef struct VADHandle VADHandle;
 // ============================================================================
 
 /// Create default VAD configuration for Silero VAD
-/// @return Default VADConfig for v6 model
-FFI_PLUGIN_EXPORT VADConfig vad_config_default(void);
+/// @param config_out Pointer to VADConfig struct to fill with default values
+FFI_PLUGIN_EXPORT void vad_config_default(VADConfig *config_out);
 
 /// Create a new VAD instance
 /// @return Pointer to new VAD handle, or NULL on failure
@@ -143,10 +144,10 @@ FFI_PLUGIN_EXPORT void vad_destroy(VADHandle *handle);
 
 /// Initialize VAD with configuration and model
 /// @param handle VAD handle
-/// @param config VAD configuration
+/// @param config Pointer to VAD configuration
 /// @param model_path Path to ONNX model file (can be NULL for bundled model)
 /// @return 0 on success, negative error code on failure
-FFI_PLUGIN_EXPORT int32_t vad_init(VADHandle *handle, VADConfig config, const char *model_path);
+FFI_PLUGIN_EXPORT int32_t vad_init(VADHandle *handle, const VADConfig *config, const char *model_path);
 
 /// Set the event callback for VAD events
 /// @param handle VAD handle
@@ -181,8 +182,8 @@ FFI_PLUGIN_EXPORT void vad_force_end_speech(VADHandle *handle);
 
 /// Check if VAD is currently detecting speech
 /// @param handle VAD handle
-/// @return true if speech is being detected
-FFI_PLUGIN_EXPORT bool vad_is_speaking(VADHandle *handle);
+/// @return 1 if speech is being detected, 0 otherwise
+FFI_PLUGIN_EXPORT int32_t vad_is_speaking(VADHandle *handle);
 
 /// Get the last error message
 /// @param handle VAD handle

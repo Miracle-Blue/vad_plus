@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -56,6 +57,7 @@ class _MyAppState extends State<MyApp> {
         _addLog('✅ VAD initialized');
       });
     } catch (e) {
+      log(e.toString());
       setState(() {
         _statusMessage = 'Error: $e';
         _addLog('❌ Init error: $e');

@@ -31,14 +31,17 @@ class VadPlusBindings {
   // ============================================================================
 
   /// Create default VAD configuration for Silero VAD
-  VADConfig vad_config_default() {
-    return _vad_config_default();
+  /// Fills the provided config struct with default values
+  void vad_config_default(ffi.Pointer<VADConfig> config_out) {
+    return _vad_config_default(config_out);
   }
 
   late final _vad_config_defaultPtr =
-      _lookup<ffi.NativeFunction<VADConfig Function()>>('vad_config_default');
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<VADConfig>)>>(
+        'vad_config_default',
+      );
   late final _vad_config_default = _vad_config_defaultPtr
-      .asFunction<VADConfig Function()>();
+      .asFunction<void Function(ffi.Pointer<VADConfig>)>();
 
   // ============================================================================
   // VAD Lifecycle
@@ -71,7 +74,7 @@ class VadPlusBindings {
   /// Initialize VAD with configuration and model
   int vad_init(
     ffi.Pointer<VADHandle> handle,
-    VADConfig config,
+    ffi.Pointer<VADConfig> config,
     ffi.Pointer<ffi.Char> model_path,
   ) {
     return _vad_init(handle, config, model_path);
@@ -82,14 +85,18 @@ class VadPlusBindings {
         ffi.NativeFunction<
           ffi.Int32 Function(
             ffi.Pointer<VADHandle>,
-            VADConfig,
+            ffi.Pointer<VADConfig>,
             ffi.Pointer<ffi.Char>,
           )
         >
       >('vad_init');
   late final _vad_init = _vad_initPtr
       .asFunction<
-        int Function(ffi.Pointer<VADHandle>, VADConfig, ffi.Pointer<ffi.Char>)
+        int Function(
+          ffi.Pointer<VADHandle>,
+          ffi.Pointer<VADConfig>,
+          ffi.Pointer<ffi.Char>,
+        )
       >();
 
   /// Set the event callback for VAD events
@@ -197,16 +204,17 @@ class VadPlusBindings {
       .asFunction<void Function(ffi.Pointer<VADHandle>)>();
 
   /// Check if VAD is currently detecting speech
+  /// Returns 1 if speaking, 0 otherwise
   bool vad_is_speaking(ffi.Pointer<VADHandle> handle) {
-    return _vad_is_speaking(handle);
+    return _vad_is_speaking(handle) != 0;
   }
 
   late final _vad_is_speakingPtr =
-      _lookup<ffi.NativeFunction<ffi.Bool Function(ffi.Pointer<VADHandle>)>>(
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<VADHandle>)>>(
         'vad_is_speaking',
       );
   late final _vad_is_speaking = _vad_is_speakingPtr
-      .asFunction<bool Function(ffi.Pointer<VADHandle>)>();
+      .asFunction<int Function(ffi.Pointer<VADHandle>)>();
 
   /// Get the last error message
   ffi.Pointer<ffi.Char> vad_get_last_error(ffi.Pointer<VADHandle> handle) {
@@ -305,8 +313,9 @@ final class VADConfig extends ffi.Struct {
   @ffi.Int32()
   external int end_speech_pad_frames;
 
-  @ffi.Bool()
-  external bool is_debug;
+  /// 0 = false, 1 = true (using Int32 for C compatibility)
+  @ffi.Int32()
+  external int is_debug;
 }
 
 /// Opaque VAD Handle
@@ -321,8 +330,9 @@ final class VADEvent extends ffi.Struct {
   @ffi.Float()
   external double frame_probability;
 
-  @ffi.Bool()
-  external bool frame_is_speech;
+  /// 0 = false, 1 = true (using Int32 for C compatibility)
+  @ffi.Int32()
+  external int frame_is_speech;
 
   external ffi.Pointer<ffi.Float> frame_data;
 
@@ -345,13 +355,16 @@ final class VADEvent extends ffi.Struct {
   external int error_code;
 }
 
-/// Native callback type definition
+/// Native callback type definition (receives pointer to event for C compatibility)
 typedef VADEventCallbackNative =
-    ffi.Void Function(VADEvent event, ffi.Pointer<ffi.Void> user_data);
+    ffi.Void Function(
+      ffi.Pointer<VADEvent> event,
+      ffi.Pointer<ffi.Void> user_data,
+    );
 
 /// Dart callback type definition
 typedef VADEventCallback =
-    void Function(VADEvent event, ffi.Pointer<ffi.Void> user_data);
+    void Function(ffi.Pointer<VADEvent> event, ffi.Pointer<ffi.Void> user_data);
 
 // ============================================================================
 // VAD Event Types (Constants)

@@ -249,7 +249,7 @@ class VadPlus {
     nativeConfig.ref.sample_rate = config.sampleRate;
     nativeConfig.ref.frame_samples = config.frameSamples;
     nativeConfig.ref.end_speech_pad_frames = config.endSpeechPadFrames;
-    nativeConfig.ref.is_debug = config.isDebug;
+    nativeConfig.ref.is_debug = config.isDebug ? 1 : 0;
 
     // Prepare model path
     final Pointer<Char> nativeModelPath;
@@ -262,7 +262,7 @@ class VadPlus {
     try {
       final result = _bindings.vad_init(
         _handle!,
-        nativeConfig.ref,
+        nativeConfig,
         nativeModelPath,
       );
       if (result != 0) {
@@ -402,7 +402,7 @@ class VadPlus {
         _eventController.add(
           VadFrameProcessedEvent(
             probability: event.frame_probability,
-            isSpeech: event.frame_is_speech,
+            isSpeech: event.frame_is_speech != 0,
           ),
         );
         break;
