@@ -14,36 +14,357 @@ import 'dart:ffi' as ffi;
 ///
 class VadPlusBindings {
   /// Holds the symbol lookup function.
-  final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) _lookup;
+  final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
+  _lookup;
 
   /// The symbols are looked up in [dynamicLibrary].
-  VadPlusBindings(ffi.DynamicLibrary dynamicLibrary) : _lookup = dynamicLibrary.lookup;
+  VadPlusBindings(ffi.DynamicLibrary dynamicLibrary)
+    : _lookup = dynamicLibrary.lookup;
 
   /// The symbols are looked up with [lookup].
-  VadPlusBindings.fromLookup(ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) lookup)
-    : _lookup = lookup;
+  VadPlusBindings.fromLookup(
+    ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) lookup,
+  ) : _lookup = lookup;
 
-  /// A very short-lived native function.
-  ///
-  /// For very short-lived functions, it is fine to call them on the main isolate.
-  /// They will block the Dart execution while running the native function, so
-  /// only do this for native functions which are guaranteed to be short-lived.
-  int sum(int a, int b) {
-    return _sum(a, b);
+  // ============================================================================
+  // VAD Configuration
+  // ============================================================================
+
+  /// Create default VAD configuration for Silero VAD
+  VADConfig vad_config_default() {
+    return _vad_config_default();
   }
 
-  late final _sumPtr = _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Int, ffi.Int)>>('sum');
-  late final _sum = _sumPtr.asFunction<int Function(int, int)>();
+  late final _vad_config_defaultPtr =
+      _lookup<ffi.NativeFunction<VADConfig Function()>>('vad_config_default');
+  late final _vad_config_default = _vad_config_defaultPtr
+      .asFunction<VADConfig Function()>();
 
-  /// A longer lived native function, which occupies the thread calling it.
-  ///
-  /// Do not call these kind of native functions in the main isolate. They will
-  /// block Dart execution. This will cause dropped frames in Flutter applications.
-  /// Instead, call these native functions on a separate isolate.
-  int sum_long_running(int a, int b) {
-    return _sum_long_running(a, b);
+  // ============================================================================
+  // VAD Lifecycle
+  // ============================================================================
+
+  /// Create a new VAD instance
+  ffi.Pointer<VADHandle> vad_create() {
+    return _vad_create();
   }
 
-  late final _sum_long_runningPtr = _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Int, ffi.Int)>>('sum_long_running');
-  late final _sum_long_running = _sum_long_runningPtr.asFunction<int Function(int, int)>();
+  late final _vad_createPtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<VADHandle> Function()>>(
+        'vad_create',
+      );
+  late final _vad_create = _vad_createPtr
+      .asFunction<ffi.Pointer<VADHandle> Function()>();
+
+  /// Destroy a VAD instance and free resources
+  void vad_destroy(ffi.Pointer<VADHandle> handle) {
+    return _vad_destroy(handle);
+  }
+
+  late final _vad_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<VADHandle>)>>(
+        'vad_destroy',
+      );
+  late final _vad_destroy = _vad_destroyPtr
+      .asFunction<void Function(ffi.Pointer<VADHandle>)>();
+
+  /// Initialize VAD with configuration and model
+  int vad_init(
+    ffi.Pointer<VADHandle> handle,
+    VADConfig config,
+    ffi.Pointer<ffi.Char> model_path,
+  ) {
+    return _vad_init(handle, config, model_path);
+  }
+
+  late final _vad_initPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Int32 Function(
+            ffi.Pointer<VADHandle>,
+            VADConfig,
+            ffi.Pointer<ffi.Char>,
+          )
+        >
+      >('vad_init');
+  late final _vad_init = _vad_initPtr
+      .asFunction<
+        int Function(ffi.Pointer<VADHandle>, VADConfig, ffi.Pointer<ffi.Char>)
+      >();
+
+  /// Set the event callback for VAD events
+  void vad_set_callback(
+    ffi.Pointer<VADHandle> handle,
+    ffi.Pointer<ffi.NativeFunction<VADEventCallbackNative>> callback,
+    ffi.Pointer<ffi.Void> user_data,
+  ) {
+    return _vad_set_callback(handle, callback, user_data);
+  }
+
+  late final _vad_set_callbackPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Pointer<VADHandle>,
+            ffi.Pointer<ffi.NativeFunction<VADEventCallbackNative>>,
+            ffi.Pointer<ffi.Void>,
+          )
+        >
+      >('vad_set_callback');
+  late final _vad_set_callback = _vad_set_callbackPtr
+      .asFunction<
+        void Function(
+          ffi.Pointer<VADHandle>,
+          ffi.Pointer<ffi.NativeFunction<VADEventCallbackNative>>,
+          ffi.Pointer<ffi.Void>,
+        )
+      >();
+
+  // ============================================================================
+  // VAD Control
+  // ============================================================================
+
+  /// Start audio capture and VAD processing
+  int vad_start(ffi.Pointer<VADHandle> handle) {
+    return _vad_start(handle);
+  }
+
+  late final _vad_startPtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(ffi.Pointer<VADHandle>)>>(
+        'vad_start',
+      );
+  late final _vad_start = _vad_startPtr
+      .asFunction<int Function(ffi.Pointer<VADHandle>)>();
+
+  /// Stop audio capture and VAD processing
+  void vad_stop(ffi.Pointer<VADHandle> handle) {
+    return _vad_stop(handle);
+  }
+
+  late final _vad_stopPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<VADHandle>)>>(
+        'vad_stop',
+      );
+  late final _vad_stop = _vad_stopPtr
+      .asFunction<void Function(ffi.Pointer<VADHandle>)>();
+
+  /// Process audio samples directly
+  int vad_process_audio(
+    ffi.Pointer<VADHandle> handle,
+    ffi.Pointer<ffi.Float> samples,
+    int sample_count,
+  ) {
+    return _vad_process_audio(handle, samples, sample_count);
+  }
+
+  late final _vad_process_audioPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Int32 Function(
+            ffi.Pointer<VADHandle>,
+            ffi.Pointer<ffi.Float>,
+            ffi.Int32,
+          )
+        >
+      >('vad_process_audio');
+  late final _vad_process_audio = _vad_process_audioPtr
+      .asFunction<
+        int Function(ffi.Pointer<VADHandle>, ffi.Pointer<ffi.Float>, int)
+      >();
+
+  /// Reset VAD state
+  void vad_reset(ffi.Pointer<VADHandle> handle) {
+    return _vad_reset(handle);
+  }
+
+  late final _vad_resetPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<VADHandle>)>>(
+        'vad_reset',
+      );
+  late final _vad_reset = _vad_resetPtr
+      .asFunction<void Function(ffi.Pointer<VADHandle>)>();
+
+  /// Force end current speech segment
+  void vad_force_end_speech(ffi.Pointer<VADHandle> handle) {
+    return _vad_force_end_speech(handle);
+  }
+
+  late final _vad_force_end_speechPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<VADHandle>)>>(
+        'vad_force_end_speech',
+      );
+  late final _vad_force_end_speech = _vad_force_end_speechPtr
+      .asFunction<void Function(ffi.Pointer<VADHandle>)>();
+
+  /// Check if VAD is currently detecting speech
+  bool vad_is_speaking(ffi.Pointer<VADHandle> handle) {
+    return _vad_is_speaking(handle);
+  }
+
+  late final _vad_is_speakingPtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function(ffi.Pointer<VADHandle>)>>(
+        'vad_is_speaking',
+      );
+  late final _vad_is_speaking = _vad_is_speakingPtr
+      .asFunction<bool Function(ffi.Pointer<VADHandle>)>();
+
+  /// Get the last error message
+  ffi.Pointer<ffi.Char> vad_get_last_error(ffi.Pointer<VADHandle> handle) {
+    return _vad_get_last_error(handle);
+  }
+
+  late final _vad_get_last_errorPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(ffi.Pointer<VADHandle>)
+        >
+      >('vad_get_last_error');
+  late final _vad_get_last_error = _vad_get_last_errorPtr
+      .asFunction<ffi.Pointer<ffi.Char> Function(ffi.Pointer<VADHandle>)>();
+
+  // ============================================================================
+  // Utility Functions
+  // ============================================================================
+
+  /// Convert float32 audio samples to PCM16
+  void vad_float_to_pcm16(
+    ffi.Pointer<ffi.Float> float_samples,
+    ffi.Pointer<ffi.Int16> pcm16_samples,
+    int sample_count,
+  ) {
+    return _vad_float_to_pcm16(float_samples, pcm16_samples, sample_count);
+  }
+
+  late final _vad_float_to_pcm16Ptr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Pointer<ffi.Float>,
+            ffi.Pointer<ffi.Int16>,
+            ffi.Int32,
+          )
+        >
+      >('vad_float_to_pcm16');
+  late final _vad_float_to_pcm16 = _vad_float_to_pcm16Ptr
+      .asFunction<
+        void Function(ffi.Pointer<ffi.Float>, ffi.Pointer<ffi.Int16>, int)
+      >();
+
+  /// Convert PCM16 audio samples to float32
+  void vad_pcm16_to_float(
+    ffi.Pointer<ffi.Int16> pcm16_samples,
+    ffi.Pointer<ffi.Float> float_samples,
+    int sample_count,
+  ) {
+    return _vad_pcm16_to_float(pcm16_samples, float_samples, sample_count);
+  }
+
+  late final _vad_pcm16_to_floatPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Pointer<ffi.Int16>,
+            ffi.Pointer<ffi.Float>,
+            ffi.Int32,
+          )
+        >
+      >('vad_pcm16_to_float');
+  late final _vad_pcm16_to_float = _vad_pcm16_to_floatPtr
+      .asFunction<
+        void Function(ffi.Pointer<ffi.Int16>, ffi.Pointer<ffi.Float>, int)
+      >();
+}
+
+// ============================================================================
+// Native Structures
+// ============================================================================
+
+/// VAD Configuration structure
+final class VADConfig extends ffi.Struct {
+  @ffi.Float()
+  external double positive_speech_threshold;
+
+  @ffi.Float()
+  external double negative_speech_threshold;
+
+  @ffi.Int32()
+  external int pre_speech_pad_frames;
+
+  @ffi.Int32()
+  external int redemption_frames;
+
+  @ffi.Int32()
+  external int min_speech_frames;
+
+  @ffi.Int32()
+  external int sample_rate;
+
+  @ffi.Int32()
+  external int frame_samples;
+
+  @ffi.Int32()
+  external int end_speech_pad_frames;
+
+  @ffi.Bool()
+  external bool is_debug;
+}
+
+/// Opaque VAD Handle
+final class VADHandle extends ffi.Opaque {}
+
+/// VAD Event structure (flat for easier FFI)
+final class VADEvent extends ffi.Struct {
+  @ffi.Int32()
+  external int type;
+
+  // Frame data
+  @ffi.Float()
+  external double frame_probability;
+
+  @ffi.Bool()
+  external bool frame_is_speech;
+
+  external ffi.Pointer<ffi.Float> frame_data;
+
+  @ffi.Int32()
+  external int frame_length;
+
+  // Speech end data
+  external ffi.Pointer<ffi.Int16> speech_end_audio_data;
+
+  @ffi.Int32()
+  external int speech_end_audio_length;
+
+  @ffi.Int32()
+  external int speech_end_duration_ms;
+
+  // Error data
+  external ffi.Pointer<ffi.Char> error_message;
+
+  @ffi.Int32()
+  external int error_code;
+}
+
+/// Native callback type definition
+typedef VADEventCallbackNative =
+    ffi.Void Function(VADEvent event, ffi.Pointer<ffi.Void> user_data);
+
+/// Dart callback type definition
+typedef VADEventCallback =
+    void Function(VADEvent event, ffi.Pointer<ffi.Void> user_data);
+
+// ============================================================================
+// VAD Event Types (Constants)
+// ============================================================================
+
+/// VAD Event type constants
+abstract class VADEventType {
+  static const int initialized = 0;
+  static const int speechStart = 1;
+  static const int speechEnd = 2;
+  static const int frameProcessed = 3;
+  static const int realSpeechStart = 4;
+  static const int misfire = 5;
+  static const int error = 6;
+  static const int stopped = 7;
 }

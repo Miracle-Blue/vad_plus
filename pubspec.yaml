@@ -1,5 +1,5 @@
 name: vad_plus
-description: "A new Flutter FFI plugin project."
+description: "Silero VAD ONNX voice activity detection FFI plugin for Flutter."
 version: 0.0.1
 
 homepage: https://github.com/Miracle-Blue/vad_plus
@@ -18,10 +18,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  ffi: ^2.1.3
   plugin_platform_interface: ^2.0.2
 
 dev_dependencies:
-  ffi: ^2.1.3
   ffigen: ^13.0.0
   flutter_test:
     sdk: flutter
