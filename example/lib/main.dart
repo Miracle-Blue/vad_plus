@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_soloud/flutter_soloud.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vad_plus/vad_plus.dart';
 
@@ -30,9 +31,16 @@ class _MyAppState extends State<MyApp> {
   final List<String> _eventLog = [];
   int _speechSegmentCount = 0;
 
+  bool _isPlaying = false;
+  SoundHandle? musicHandle;
+
   @override
   void initState() {
     super.initState();
+
+    _isPlaying = false;
+
+    SoLoud.instance.init();
   }
 
   @override
@@ -82,6 +90,7 @@ class _MyAppState extends State<MyApp> {
       }
     }
 
+    final stopwatch = Stopwatch()..start();
     try {
       await _vad!.start();
       setState(() {
@@ -94,20 +103,27 @@ class _MyAppState extends State<MyApp> {
         _statusMessage = 'Start error: $e';
         _addLog('❌ Start error: $e');
       });
+    } finally {
+      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'start VAD', level: 100);
     }
   }
 
   void _stopListening() {
-    if (_vad == null) return;
+    final stopwatch = Stopwatch()..start();
+    try {
+      if (_vad == null) return;
 
-    _vad!.stop();
-    setState(() {
-      _isListening = false;
-      _isSpeaking = false;
-      _currentProbability = 0.0;
-      _statusMessage = 'Stopped - Ready to start';
-      _addLog('⏹️ Stopped listening');
-    });
+      _vad!.stop();
+      setState(() {
+        _isListening = false;
+        _isSpeaking = false;
+        _currentProbability = 0.0;
+        _statusMessage = 'Stopped - Ready to start';
+        _addLog('⏹️ Stopped listening');
+      });
+    } finally {
+      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'stop VAD', level: 100);
+    }
   }
 
   void _stopAndDispose() {
@@ -128,6 +144,11 @@ class _MyAppState extends State<MyApp> {
           _statusMessage = '🗣️ Speech detected...';
         });
         _addLog('🗣️ Speech started');
+
+        if (musicHandle != null) {
+          SoLoud.instance.setVolume(musicHandle!, 0.5);
+        }
+
         break;
 
       case VadSpeechEndEvent():
@@ -137,6 +158,11 @@ class _MyAppState extends State<MyApp> {
           _statusMessage = '✅ Speech ended (${event.durationMs}ms, ${event.audioData.length} samples)';
         });
         _addLog('🔇 Speech ended: ${event.durationMs}ms, ${event.audioData.length} samples');
+
+        if (musicHandle != null) {
+          SoLoud.instance.setVolume(musicHandle!, 1.0);
+        }
+
         break;
 
       case VadFrameProcessedEvent():
@@ -308,7 +334,27 @@ class _MyAppState extends State<MyApp> {
               ),
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 32),
+
+            ElevatedButton(
+              onPressed: () async {
+                if (_isPlaying) {
+                  SoLoud.instance.disposeAllSources();
+                  setState(() {
+                    _isPlaying = false;
+                  });
+                } else {
+                  final musicSource = await SoLoud.instance.loadAsset('assets/music/skyfall.mp3');
+                  musicHandle = await SoLoud.instance.play(musicSource);
+                  setState(() {
+                    _isPlaying = true;
+                  });
+                }
+              },
+              child: const Text('Play/Stop Music'),
+            ),
+
+            const SizedBox(height: 32),
 
             // Event log
             Expanded(

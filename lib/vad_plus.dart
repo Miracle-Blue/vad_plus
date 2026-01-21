@@ -202,6 +202,15 @@ class VadPlus {
 
   bool _isInitialized = false;
   bool _isRunning = false;
+  bool _isDisposed = false;
+
+  // Native callback for receiving events from the native side
+  NativeCallable<VADEventCallbackNative>? _nativeCallback;
+
+  // Static registry for hot reload cleanup
+  // When a new VadPlus instance is initialized, any previous active instance
+  // is automatically disposed to prevent callback lifecycle issues during hot reload
+  static VadPlus? _previousInstance;
 
   /// Stream of VAD events.
   Stream<VadEvent> get events => _eventController.stream;
@@ -230,11 +239,32 @@ class VadPlus {
       throw StateError('VAD is already initialized. Call dispose() first.');
     }
 
+    if (_isDisposed) {
+      throw StateError(
+        'This VadPlus instance has been disposed. Create a new instance.',
+      );
+    }
+
+    // CRITICAL: Clean up any previous instance to handle hot reload
+    // During hot reload, the old Dart instance may still have native callbacks
+    // registered, which would crash when invoked after the Dart side is gone
+    if (_previousInstance != null && _previousInstance != this) {
+      try {
+        _previousInstance!.dispose();
+      } catch (_) {
+        // Ignore errors during cleanup of previous instance
+      }
+    }
+    _previousInstance = this;
+
     // Create handle
     _handle = _bindings.vad_create();
     if (_handle == null || _handle == nullptr) {
       throw Exception('Failed to create VAD handle');
     }
+
+    // Set active instance for static callback
+    _activeInstance = this;
 
     // Set up callback
     _setupCallback();
@@ -335,13 +365,35 @@ class VadPlus {
 
   /// Dispose of the VAD instance and release resources.
   void dispose() {
+    if (_isDisposed) return;
+    _isDisposed = true;
+
     stop();
+
+    // Close the native callback FIRST before destroying the handle
+    // This ensures the native side won't try to invoke a deleted callback
+    _nativeCallback?.close();
+    _nativeCallback = null;
+
+    // Clear active instance if this is it
+    if (_activeInstance == this) {
+      _activeInstance = null;
+    }
+
+    // Clear previous instance reference if this is it
+    if (_previousInstance == this) {
+      _previousInstance = null;
+    }
+
     if (_handle != null) {
       _bindings.vad_destroy(_handle!);
       _handle = null;
     }
     _isInitialized = false;
-    _eventController.close();
+
+    if (!_eventController.isClosed) {
+      _eventController.close();
+    }
   }
 
   // ===========================================================================
@@ -362,30 +414,53 @@ class VadPlus {
   }
 
   void _setupCallback() {
-    // Note: For proper callback handling with native code,
-    // we use NativeCallable.
-    // The Swift implementation handles events and
-    // dispatches them to the main thread.
-    // This callback bridge allows native code to notify Dart of VAD events.
+    // Create a NativeCallable for the callback
+    // Using listener so the callback can be invoked from any thread (including
+    // the native audio processing thread). The callback will be scheduled on
+    // the Dart event loop.
+    _nativeCallback = NativeCallable<VADEventCallbackNative>.listener(
+      _onNativeEvent,
+    );
 
-    // TODO: Implement proper NativeCallable for callback handling
-    // For now, the Swift side manages its own callback mechanism
+    // Register the callback with the native handle
+    _bindings.vad_set_callback(
+      _handle!,
+      _nativeCallback!.nativeFunction,
+      nullptr,
+    );
   }
 
-  /// Handle native VAD events and dispatch to the Dart stream.
-  /// This is called from the native callback bridge.
-  void handleNativeEvent(VADEvent event) {
+  /// Static callback handler that receives events from native code.
+  /// Called synchronously from the native side (via DispatchQueue.main).
+  static void _onNativeEvent(
+    Pointer<VADEvent> eventPtr,
+    Pointer<Void> userData,
+  ) {
+    final instance = _activeInstance;
+    if (instance == null || eventPtr == nullptr) return;
+
+    // Check if instance is disposed to avoid processing stale events
+    if (instance._isDisposed) return;
+
+    // Read and copy data from the pointer immediately since we're called
+    // synchronously and the pointer is only valid during this call
+    final event = eventPtr.ref;
+    instance._processNativeEvent(event);
+  }
+
+  static VadPlus? _activeInstance;
+
+  void _processNativeEvent(VADEvent event) {
     switch (event.type) {
       case VADEventType.initialized:
         _eventController.add(const VadInitializedEvent());
-        break;
       case VADEventType.speechStart:
         _eventController.add(const VadSpeechStartEvent());
-        break;
       case VADEventType.speechEnd:
         final audioLength = event.speech_end_audio_length;
         final audioPtr = event.speech_end_audio_data;
         if (audioPtr != nullptr && audioLength > 0) {
+          // Copy the audio data immediately while pointer is valid
           final audioData = Int16List(audioLength);
           for (var i = 0; i < audioLength; i++) {
             audioData[i] = audioPtr[i];
@@ -397,7 +472,6 @@ class VadPlus {
             ),
           );
         }
-        break;
       case VADEventType.frameProcessed:
         _eventController.add(
           VadFrameProcessedEvent(
@@ -405,13 +479,10 @@ class VadPlus {
             isSpeech: event.frame_is_speech != 0,
           ),
         );
-        break;
       case VADEventType.realSpeechStart:
         _eventController.add(const VadRealSpeechStartEvent());
-        break;
       case VADEventType.misfire:
         _eventController.add(const VadMisfireEvent());
-        break;
       case VADEventType.error:
         final messagePtr = event.error_message;
         final message = messagePtr != nullptr
@@ -420,10 +491,8 @@ class VadPlus {
         _eventController.add(
           VadErrorEvent(message: message, code: event.error_code),
         );
-        break;
       case VADEventType.stopped:
         _eventController.add(const VadStoppedEvent());
-        break;
     }
   }
 }
