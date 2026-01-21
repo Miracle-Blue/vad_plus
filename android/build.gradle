@@ -4,6 +4,7 @@ group = "dev.miracle.vad_plus"
 version = "1.0"
 
 buildscript {
+    ext.kotlin_version = "1.9.22"
     repositories {
         google()
         mavenCentral()
@@ -12,6 +13,7 @@ buildscript {
     dependencies {
         // The Android Gradle Plugin knows how to build native code with the NDK.
         classpath("com.android.tools.build:gradle:8.11.1")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
 
@@ -23,6 +25,7 @@ rootProject.allprojects {
 }
 
 apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
 
 android {
     namespace = "dev.miracle.vad_plus"
@@ -40,7 +43,7 @@ android {
     // Invoke the shared CMake build with the Android Gradle Plugin.
     externalNativeBuild {
         cmake {
-            path = "../src/CMakeLists.txt"
+            path = "src/main/jni/CMakeLists.txt"
 
             // The default CMake version for the Android Gradle Plugin is 3.10.2.
             // https://developer.android.com/studio/projects/install-ndk#vanilla_cmake
@@ -57,7 +60,26 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     defaultConfig {
         minSdk = 24
+        
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+        }
     }
+    
+    sourceSets {
+        main {
+            assets.srcDirs = ["src/main/assets"]
+        }
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    implementation "com.microsoft.onnxruntime:onnxruntime-android:1.16.3"
 }
