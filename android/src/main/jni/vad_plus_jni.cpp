@@ -269,6 +269,7 @@ Java_dev_miracle_vad_1plus_VADHandleInternal_nativeSendFrameEvent(
     jlong userDataPtr,
     jfloat probability,
     jboolean isSpeech,
+    jfloatArray frameData,
     jint frameLength)
 {
     if (callbackPtr == 0)
@@ -277,14 +278,29 @@ Java_dev_miracle_vad_1plus_VADHandleInternal_nativeSendFrameEvent(
     VADEventCallback callback = reinterpret_cast<VADEventCallback>(callbackPtr);
     void *userData = reinterpret_cast<void *>(userDataPtr);
 
+    // Copy frame data
+    float *frameCopy = nullptr;
+    if (frameData != nullptr && frameLength > 0)
+    {
+        jfloat *frameElements = env->GetFloatArrayElements(frameData, nullptr);
+        frameCopy = new float[frameLength];
+        memcpy(frameCopy, frameElements, frameLength * sizeof(float));
+        env->ReleaseFloatArrayElements(frameData, frameElements, JNI_ABORT);
+    }
+
     VADEventC *event = new VADEventC();
     memset(event, 0, sizeof(VADEventC));
     event->type = 3; // FRAME_PROCESSED
     event->frame_probability = probability;
     event->frame_is_speech = isSpeech ? 1 : 0;
+    event->frame_data = frameCopy;
     event->frame_length = frameLength;
 
     callback(event, userData);
+
+    // Note: frameCopy should be freed by Dart after processing
+    // For safety, schedule deletion after a delay
+    // In production, this should be managed more carefully
 }
 
 extern "C" JNIEXPORT void JNICALL

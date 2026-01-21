@@ -101,21 +101,21 @@ sealed class VadEvent {
 }
 
 /// Emitted when VAD is initialized successfully.
-class VadInitializedEvent extends VadEvent {
+class VadInitialized extends VadEvent {
   /// Emitted when VAD is initialized successfully.
-  const VadInitializedEvent();
+  const VadInitialized();
 }
 
 /// Emitted when speech starts (initial detection).
-class VadSpeechStartEvent extends VadEvent {
+class VadSpeechStart extends VadEvent {
   /// Emitted when speech starts (initial detection).
-  const VadSpeechStartEvent();
+  const VadSpeechStart();
 }
 
 /// Emitted when speech ends with recorded audio.
-class VadSpeechEndEvent extends VadEvent {
+class VadSpeechEnd extends VadEvent {
   /// Emitted when speech ends with recorded audio.
-  const VadSpeechEndEvent({required this.audioData, required this.durationMs});
+  const VadSpeechEnd({required this.audioData, required this.durationMs});
 
   /// PCM16 audio data of the speech segment.
   final Int16List audioData;
@@ -125,11 +125,12 @@ class VadSpeechEndEvent extends VadEvent {
 }
 
 /// Emitted for each processed audio frame.
-class VadFrameProcessedEvent extends VadEvent {
+class VadFrameProcessed extends VadEvent {
   /// Emitted for each processed audio frame.
-  const VadFrameProcessedEvent({
+  const VadFrameProcessed({
     required this.probability,
     required this.isSpeech,
+    required this.audioData,
   });
 
   /// Speech probability (0.0 - 1.0).
@@ -137,24 +138,27 @@ class VadFrameProcessedEvent extends VadEvent {
 
   /// Whether the frame is classified as speech.
   final bool isSpeech;
+
+  /// Float32 audio samples of this frame (normalized -1.0 to 1.0).
+  final Float32List audioData;
 }
 
 /// Emitted when real speech is confirmed (after minSpeechFrames).
-class VadRealSpeechStartEvent extends VadEvent {
+class VadRealSpeechStart extends VadEvent {
   /// Emitted when real speech is confirmed (after minSpeechFrames).
-  const VadRealSpeechStartEvent();
+  const VadRealSpeechStart();
 }
 
 /// Emitted when detected speech was too short (misfire).
-class VadMisfireEvent extends VadEvent {
+class VadMisfire extends VadEvent {
   /// Emitted when detected speech was too short (misfire).
-  const VadMisfireEvent();
+  const VadMisfire();
 }
 
 /// Emitted when an error occurs.
-class VadErrorEvent extends VadEvent {
+class VadError extends VadEvent {
   /// Emitted when an error occurs.
-  const VadErrorEvent({required this.message, required this.code});
+  const VadError({required this.message, required this.code});
 
   /// Error message.
   final String message;
@@ -164,9 +168,9 @@ class VadErrorEvent extends VadEvent {
 }
 
 /// Emitted when VAD is stopped.
-class VadStoppedEvent extends VadEvent {
+class VadStopped extends VadEvent {
   /// Emitted when VAD is stopped.
-  const VadStoppedEvent();
+  const VadStopped();
 }
 
 // ============================================================================
@@ -462,9 +466,9 @@ class VadPlus {
   void _processNativeEvent(VADEvent event) {
     switch (event.type) {
       case VADEventType.initialized:
-        _eventController.add(const VadInitializedEvent());
+        _eventController.add(const VadInitialized());
       case VADEventType.speechStart:
-        _eventController.add(const VadSpeechStartEvent());
+        _eventController.add(const VadSpeechStart());
       case VADEventType.speechEnd:
         final audioLength = event.speech_end_audio_length;
         final audioPtr = event.speech_end_audio_data;
@@ -475,33 +479,46 @@ class VadPlus {
             audioData[i] = audioPtr[i];
           }
           _eventController.add(
-            VadSpeechEndEvent(
+            VadSpeechEnd(
               audioData: audioData,
               durationMs: event.speech_end_duration_ms,
             ),
           );
         }
       case VADEventType.frameProcessed:
+        final frameLength = event.frame_length;
+        final framePtr = event.frame_data;
+        Float32List audioData;
+        if (framePtr != nullptr && frameLength > 0) {
+          // Copy the audio data immediately while pointer is valid
+          audioData = Float32List(frameLength);
+          for (var i = 0; i < frameLength; i++) {
+            audioData[i] = framePtr[i];
+          }
+        } else {
+          audioData = Float32List(0);
+        }
         _eventController.add(
-          VadFrameProcessedEvent(
+          VadFrameProcessed(
             probability: event.frame_probability,
             isSpeech: event.frame_is_speech != 0,
+            audioData: audioData,
           ),
         );
       case VADEventType.realSpeechStart:
-        _eventController.add(const VadRealSpeechStartEvent());
+        _eventController.add(const VadRealSpeechStart());
       case VADEventType.misfire:
-        _eventController.add(const VadMisfireEvent());
+        _eventController.add(const VadMisfire());
       case VADEventType.error:
         final messagePtr = event.error_message;
         final message = messagePtr != nullptr
             ? messagePtr.cast<Utf8>().toDartString()
             : 'Unknown error';
         _eventController.add(
-          VadErrorEvent(message: message, code: event.error_code),
+          VadError(message: message, code: event.error_code),
         );
       case VADEventType.stopped:
-        _eventController.add(const VadStoppedEvent());
+        _eventController.add(const VadStopped());
     }
   }
 }

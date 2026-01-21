@@ -590,12 +590,19 @@ class VADHandleInternal {
     }
     
     private func sendFrameEvent(probability: Float, isSpeech: Bool, frame: [Float]) {
+        // Allocate frame data copy that persists until Dart processes the callback
+        let frameCopy = UnsafeMutablePointer<Float>.allocate(capacity: frame.count)
+        for (i, sample) in frame.enumerated() {
+            frameCopy[i] = sample
+        }
+        
         // Allocate event on the heap
         let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
         eventPtr.initialize(to: VADEventCStruct())
         eventPtr.pointee.type = VADEventTypeInternal.frameProcessed.rawValue
         eventPtr.pointee.frame_probability = probability
         eventPtr.pointee.frame_is_speech = isSpeech ? 1 : 0
+        eventPtr.pointee.frame_data = UnsafePointer(frameCopy)
         eventPtr.pointee.frame_length = Int32(frame.count)
         
         var didInvoke = false
@@ -608,10 +615,12 @@ class VADHandleInternal {
         
         if didInvoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                frameCopy.deallocate()
                 eventPtr.deinitialize(count: 1)
                 eventPtr.deallocate()
             }
         } else {
+            frameCopy.deallocate()
             eventPtr.deinitialize(count: 1)
             eventPtr.deallocate()
         }

@@ -533,7 +533,7 @@ class VADHandleInternal {
         
         callbackLock.withLock {
             if (callbackValid.get() && callbackPtr != 0L) {
-                nativeSendFrameEvent(callbackPtr, userDataPtr, probability, isSpeech, frame.size)
+                nativeSendFrameEvent(callbackPtr, userDataPtr, probability, isSpeech, frame, frame.size)
             }
         }
     }
@@ -574,7 +574,8 @@ class VADHandleInternal {
             callbackPtr: Long, 
             userDataPtr: Long, 
             probability: Float, 
-            isSpeech: Boolean, 
+            isSpeech: Boolean,
+            frameData: FloatArray,
             frameLength: Int
         )
         

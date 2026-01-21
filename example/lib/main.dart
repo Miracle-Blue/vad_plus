@@ -171,11 +171,11 @@ class _MyAppState extends State<MyApp> {
 
   void _handleVadEvent(VadEvent event) {
     switch (event) {
-      case VadInitializedEvent():
+      case VadInitialized():
         _addLog('📢 Event: Initialized');
         break;
 
-      case VadSpeechStartEvent():
+      case VadSpeechStart():
         setState(() {
           _isSpeaking = true;
           _statusMessage = '🗣️ Speech detected...';
@@ -188,7 +188,7 @@ class _MyAppState extends State<MyApp> {
 
         break;
 
-      case VadSpeechEndEvent():
+      case VadSpeechEnd():
         setState(() {
           _isSpeaking = false;
           _speechSegmentCount++;
@@ -202,18 +202,19 @@ class _MyAppState extends State<MyApp> {
 
         break;
 
-      case VadFrameProcessedEvent():
+      case VadFrameProcessed():
         setState(() {
           _currentProbability = event.probability;
+          event.audioData;
+          _addLog('📢 Frame processed: ${event.probability}, ${event.audioData.length} samples');
         });
-        // Don't log every frame to avoid spam
         break;
 
-      case VadRealSpeechStartEvent():
+      case VadRealSpeechStart():
         _addLog('✨ Real speech confirmed');
         break;
 
-      case VadMisfireEvent():
+      case VadMisfire():
         setState(() {
           _isSpeaking = false;
           _statusMessage = '⚡ Misfire (too short)';
@@ -226,14 +227,14 @@ class _MyAppState extends State<MyApp> {
 
         break;
 
-      case VadErrorEvent():
+      case VadError():
         setState(() {
           _statusMessage = '❌ Error: ${event.message}';
         });
         _addLog('❌ Error: ${event.message} (code: ${event.code})');
         break;
 
-      case VadStoppedEvent():
+      case VadStopped():
         _addLog('⏹️ VAD stopped');
         break;
     }
