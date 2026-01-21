@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_soloud/flutter_soloud.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vad_plus/vad_plus.dart';
 
@@ -40,7 +41,28 @@ class _MyAppState extends State<MyApp> {
 
     _isPlaying = false;
 
-    SoLoud.instance.init();
+    _initSoLoud();
+  }
+
+  Future<void> _initSoLoud() async {
+    // On macOS sandboxed apps, we need to ensure the cache directory exists
+    // before SoLoud.init() because flutter_soloud doesn't create parent dirs
+    if (Platform.isMacOS) {
+      try {
+        final cacheDir = await getApplicationCacheDirectory();
+        if (!await cacheDir.exists()) {
+          await cacheDir.create(recursive: true);
+        }
+      } catch (e) {
+        log('Failed to create cache directory: $e');
+      }
+    }
+
+    try {
+      await SoLoud.instance.init();
+    } catch (e) {
+      log('Failed to initialize SoLoud: $e');
+    }
   }
 
   @override
@@ -50,6 +72,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _initializeVad() async {
+    final stopwatch = Stopwatch()..start();
     try {
       _vad = VadPlus();
 
@@ -72,6 +95,8 @@ class _MyAppState extends State<MyApp> {
         _statusMessage = 'Error: $e';
         _addLog('❌ Init error: $e');
       });
+    } finally {
+      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'initialize VAD', level: 100);
     }
   }
 
@@ -127,9 +152,21 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _stopAndDispose() {
-    _eventSubscription?.cancel();
-    _vad?.dispose();
-    _vad = null;
+    final stopwatch = Stopwatch()..start();
+    try {
+      _eventSubscription?.cancel();
+      _vad?.dispose();
+      _vad = null;
+
+      _isInitialized = false;
+      _isListening = false;
+      _isSpeaking = false;
+      _currentProbability = 0.0;
+      _statusMessage = 'Not initialized';
+      _addLog('❌ VAD stopped and disposed');
+    } finally {
+      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'stop and dispose VAD', level: 100);
+    }
   }
 
   void _handleVadEvent(VadEvent event) {
@@ -146,7 +183,7 @@ class _MyAppState extends State<MyApp> {
         _addLog('🗣️ Speech started');
 
         if (musicHandle != null) {
-          SoLoud.instance.setVolume(musicHandle!, 0.5);
+          SoLoud.instance.fadeVolume(musicHandle!, 0.3, Duration(milliseconds: 100));
         }
 
         break;
@@ -160,7 +197,7 @@ class _MyAppState extends State<MyApp> {
         _addLog('🔇 Speech ended: ${event.durationMs}ms, ${event.audioData.length} samples');
 
         if (musicHandle != null) {
-          SoLoud.instance.setVolume(musicHandle!, 1.0);
+          SoLoud.instance.fadeVolume(musicHandle!, 1.0, Duration(milliseconds: 500));
         }
 
         break;
@@ -182,6 +219,11 @@ class _MyAppState extends State<MyApp> {
           _statusMessage = '⚡ Misfire (too short)';
         });
         _addLog('⚡ Misfire - speech too short');
+
+        if (musicHandle != null) {
+          SoLoud.instance.fadeVolume(musicHandle!, 1.0, Duration(milliseconds: 500));
+        }
+
         break;
 
       case VadErrorEvent():
@@ -303,9 +345,9 @@ class _MyAppState extends State<MyApp> {
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isInitialized ? null : _initializeVad,
+                      onPressed: _isInitialized ? _stopAndDispose : _initializeVad,
                       icon: const Icon(Icons.play_arrow),
-                      label: const Text('Initialize'),
+                      label: const Text('Initialize/Dispose'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.teal,
                         foregroundColor: Colors.white,
@@ -338,17 +380,24 @@ class _MyAppState extends State<MyApp> {
 
             ElevatedButton(
               onPressed: () async {
-                if (_isPlaying) {
-                  SoLoud.instance.disposeAllSources();
-                  setState(() {
-                    _isPlaying = false;
-                  });
-                } else {
-                  final musicSource = await SoLoud.instance.loadAsset('assets/music/skyfall.mp3');
-                  musicHandle = await SoLoud.instance.play(musicSource);
-                  setState(() {
-                    _isPlaying = true;
-                  });
+                try {
+                  if (_isPlaying) {
+                    log('Stopping music...', name: 'play music', level: 100);
+                    await SoLoud.instance.stop(musicHandle!);
+                    musicHandle = null;
+                    setState(() {
+                      _isPlaying = false;
+                    });
+                  } else {
+                    log('Loading music...', name: 'play music', level: 100);
+                    final musicSource = await SoLoud.instance.loadAsset('assets/music/skyfall.mp3');
+                    musicHandle = await SoLoud.instance.play(musicSource);
+                    setState(() {
+                      _isPlaying = true;
+                    });
+                  }
+                } on Object catch (error, stackTrace) {
+                  log('Error: $error, stackTrace: $stackTrace', name: 'play music', level: 100);
                 }
               },
               child: const Text('Play/Stop Music'),

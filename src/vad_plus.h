@@ -155,6 +155,12 @@ FFI_PLUGIN_EXPORT int32_t vad_init(VADHandle *handle, const VADConfig *config, c
 /// @param user_data User data passed to callback
 FFI_PLUGIN_EXPORT void vad_set_callback(VADHandle *handle, VADEventCallback callback, void *user_data);
 
+/// Invalidate the callback to prevent it from being invoked
+/// This MUST be called before closing the Dart NativeCallable to prevent crashes.
+/// Uses synchronous dispatch to ensure all pending callbacks complete first.
+/// @param handle VAD handle
+FFI_PLUGIN_EXPORT void vad_invalidate_callback(VADHandle *handle);
+
 /// Start audio capture and VAD processing
 /// @param handle VAD handle
 /// @return 0 on success, negative error code on failure

@@ -62,51 +62,58 @@ class VADHandleInternal {
     
     // Audio engine for microphone capture
     var audioEngine: AVAudioEngine?
+    var audioConverter: AVAudioConverter?
+    var outputFormat: AVAudioFormat?
+    var isAudioSessionConfigured = false
     
     // Callback - using UnsafeRawPointer for C compatibility (Swift structs aren't directly C-representable)
-    // Protected by callbackLock for thread-safe access
+    // All callback operations are serialized through callbackQueue to prevent race conditions
+    // with NativeCallable.listener which can crash if called after being closed.
     private var _callback: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void)?
     private var _userData: UnsafeMutableRawPointer?
     private var _callbackValid: Bool = false
-    private let callbackLock = NSLock()
     
-    // Thread-safe callback accessors
+    // Serial queue for all callback operations - ensures callback is never called after invalidation
+    private let callbackQueue = DispatchQueue(label: "dev.miracle.vadplus.callback", qos: .userInteractive)
+    
+    // Thread-safe callback accessors using the serial queue
     var callback: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void)? {
         get {
-            callbackLock.lock()
-            defer { callbackLock.unlock() }
-            return _callbackValid ? _callback : nil
+            return callbackQueue.sync {
+                return _callbackValid ? _callback : nil
+            }
         }
         set {
-            callbackLock.lock()
-            defer { callbackLock.unlock() }
-            _callback = newValue
-            _callbackValid = newValue != nil
+            callbackQueue.sync {
+                _callback = newValue
+                _callbackValid = newValue != nil
+            }
         }
     }
     
     var userData: UnsafeMutableRawPointer? {
         get {
-            callbackLock.lock()
-            defer { callbackLock.unlock() }
-            return _userData
+            return callbackQueue.sync {
+                return _userData
+            }
         }
         set {
-            callbackLock.lock()
-            defer { callbackLock.unlock() }
-            _userData = newValue
+            callbackQueue.sync {
+                _userData = newValue
+            }
         }
     }
     
     /// Invalidates the callback to prevent it from being invoked.
     /// This MUST be called before stopping the audio engine to prevent
     /// race conditions during hot reload.
+    /// Uses sync dispatch to ensure all pending callback invocations complete first.
     func invalidateCallback() {
-        callbackLock.lock()
-        defer { callbackLock.unlock() }
-        _callbackValid = false
-        _callback = nil
-        _userData = nil
+        callbackQueue.sync {
+            _callbackValid = false
+            _callback = nil
+            _userData = nil
+        }
     }
     
     // Last error
@@ -137,6 +144,11 @@ class VADHandleInternal {
         // Invalidate callback first to prevent any pending audio callbacks
         invalidateCallback()
         stopListening()
+        // Clean up cached audio components
+        audioEngine = nil
+        audioConverter = nil
+        outputFormat = nil
+        isAudioSessionConfigured = false
         ortSession = nil
         ortEnv = nil
     }
@@ -171,7 +183,61 @@ class VADHandleInternal {
             print("VadPlus: Model loaded from \(finalModelPath)")
         }
         
+        // Pre-configure audio session and engine for faster startup
+        try preconfigureAudio()
+        
         sendEvent(type: .initialized)
+    }
+    
+    /// Pre-configures audio session and engine during initialization for faster start
+    private func preconfigureAudio() throws {
+        #if os(iOS)
+        if !isAudioSessionConfigured {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .default,
+                options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers]
+            )
+            // Use smaller buffer for lower latency
+            try audioSession.setPreferredIOBufferDuration(0.005) // 5ms instead of 20ms
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            isAudioSessionConfigured = true
+            
+            if config.isDebug {
+                print("VadPlus: Audio session pre-configured")
+            }
+        }
+        #endif
+        
+        // Pre-create audio engine and format
+        if audioEngine == nil {
+            audioEngine = AVAudioEngine()
+            
+            guard let engine = audioEngine else { return }
+            
+            outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: Double(config.sampleRate),
+                channels: 1,
+                interleaved: false
+            )
+            
+            let inputNode = engine.inputNode
+            let inputFormat = inputNode.outputFormat(forBus: 0)
+            
+            if let outFmt = outputFormat,
+               inputFormat.sampleRate != outFmt.sampleRate || inputFormat.channelCount != 1 {
+                audioConverter = AVAudioConverter(from: inputFormat, to: outFmt)
+            }
+            
+            // Pre-prepare the engine (this is expensive)
+            engine.prepare()
+            
+            if config.isDebug {
+                print("VadPlus: Audio engine pre-prepared")
+            }
+        }
     }
     
     private func findBundledModel() -> String? {
@@ -285,42 +351,55 @@ class VADHandleInternal {
                          userInfo: [NSLocalizedDescriptionKey: "VAD not initialized"])
         }
         
+        // Ensure audio is pre-configured (if not already done in init)
         #if os(iOS)
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(
-            .playAndRecord,
-            mode: .default,
-            options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers]
-        )
-        try audioSession.setPreferredIOBufferDuration(0.02)
-        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        if !isAudioSessionConfigured {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .default,
+                options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers]
+            )
+            try audioSession.setPreferredIOBufferDuration(0.005)
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            isAudioSessionConfigured = true
+        }
         #endif
         
-        audioEngine = AVAudioEngine()
+        // Create engine if not pre-created
+        if audioEngine == nil {
+            audioEngine = AVAudioEngine()
+        }
         
-        guard let audioEngine = audioEngine else {
+        guard let engine = audioEngine else {
             throw NSError(domain: "VadPlus", code: -3,
                          userInfo: [NSLocalizedDescriptionKey: "Failed to create audio engine"])
         }
         
-        let inputNode = audioEngine.inputNode
+        let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
         
-        guard let outputFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: Double(config.sampleRate),
-            channels: 1,
-            interleaved: false
-        ) else {
+        // Create output format if not pre-created
+        if outputFormat == nil {
+            outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: Double(config.sampleRate),
+                channels: 1,
+                interleaved: false
+            )
+        }
+        
+        guard let outFmt = outputFormat else {
             throw NSError(domain: "VadPlus", code: -4,
                          userInfo: [NSLocalizedDescriptionKey: "Failed to create audio format"])
         }
         
-        var converter: AVAudioConverter?
-        if inputFormat.sampleRate != outputFormat.sampleRate || inputFormat.channelCount != 1 {
-            converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+        // Create converter if not pre-created and needed
+        if audioConverter == nil && (inputFormat.sampleRate != outFmt.sampleRate || inputFormat.channelCount != 1) {
+            audioConverter = AVAudioConverter(from: inputFormat, to: outFmt)
         }
         
+        let converter = audioConverter
         let bufferSize = AVAudioFrameCount(config.frameSamples)
         
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] buffer, _ in
@@ -334,8 +413,8 @@ class VADHandleInternal {
             
             if let converter = converter {
                 guard let convertedBuffer = AVAudioPCMBuffer(
-                    pcmFormat: outputFormat,
-                    frameCapacity: AVAudioFrameCount(Double(buffer.frameLength) * outputFormat.sampleRate / inputFormat.sampleRate)
+                    pcmFormat: outFmt,
+                    frameCapacity: AVAudioFrameCount(Double(buffer.frameLength) * outFmt.sampleRate / inputFormat.sampleRate)
                 ) else { return }
                 
                 var error: NSError?
@@ -353,8 +432,11 @@ class VADHandleInternal {
             self.processAudioData(floatData)
         }
         
-        audioEngine.prepare()
-        try audioEngine.start()
+        // Only prepare if not already prepared
+        if !engine.isRunning {
+            engine.prepare()
+        }
+        try engine.start()
         
         if config.isDebug {
             print("VadPlus: Audio capture started")
@@ -362,32 +444,26 @@ class VADHandleInternal {
     }
     
     func stopListening() {
-        // CRITICAL: Invalidate callback FIRST before stopping audio engine
-        // This prevents the audio tap callback from invoking a deleted Dart callback
-        // during hot reload scenarios
-        let hadCallback = callback != nil
-        invalidateCallback()
+        // Stop audio engine and remove tap
+        // NOTE: Do NOT invalidate callback here - the callback should remain valid
+        // until the VAD is destroyed. Invalidating on stop prevents restarting.
+        // Hot reload cleanup is handled on the Dart side via _previousInstance.
         
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
-        audioEngine = nil
-        
-        // Note: We can't emit speech end here since callback is already invalidated
-        // The speech data would be lost, but this is acceptable during hot reload
+        // Keep audioEngine, audioConverter, outputFormat for faster restart
+        // They will be recreated if needed in startListening
         
         resetStates()
         
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
+        // NOTE: We intentionally do NOT call setActive(false) here because it would
+        // interrupt other audio that's playing (like music). The audio session will
+        // be reconfigured when startListening() is called again, and iOS will
+        // manage the session lifecycle appropriately.
+        // Also keep isAudioSessionConfigured = true for faster restart
         
-        // Only try to send stopped event if we had a valid callback
-        // (callback was already invalidated, so this will be a no-op,
-        // but we keep the logic for clarity)
-        if hadCallback {
-            // Callback is invalidated, so this won't actually send
-            // But if we want to send before invalidation, we'd restructure
-        }
+        // Send stopped event
+        sendEvent(type: .stopped)
     }
     
     private func bufferToFloatArray(_ buffer: AVAudioPCMBuffer) -> [Float] {
@@ -556,40 +632,37 @@ class VADHandleInternal {
     // MARK: - Event Sending
     
     private func sendEvent(type: VADEventTypeInternal) {
-        // Thread-safe access to callback - returns nil if invalidated
-        callbackLock.lock()
-        guard _callbackValid, let cb = _callback else {
-            callbackLock.unlock()
-            return
-        }
-        let ud = _userData
-        callbackLock.unlock()
-        
         // Allocate event on the heap since NativeCallable.listener processes
         // the callback asynchronously on the Dart event loop
         let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
         eventPtr.initialize(to: VADEventCStruct())
         eventPtr.pointee.type = type.rawValue
         
-        cb(UnsafeRawPointer(eventPtr), ud)
+        // Safely invoke callback within serial queue to prevent race conditions
+        // CRITICAL: The callback invocation MUST happen within the sync block
+        // so that invalidateCallback() will wait for it to complete
+        var didInvoke = false
+        callbackQueue.sync {
+            guard _callbackValid, let cb = _callback else { return }
+            let ud = _userData
+            cb(UnsafeRawPointer(eventPtr), ud)
+            didInvoke = true
+        }
         
-        // Schedule cleanup after Dart has processed the event
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        if didInvoke {
+            // Schedule cleanup after Dart has processed the event
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                eventPtr.deinitialize(count: 1)
+                eventPtr.deallocate()
+            }
+        } else {
+            // Callback was invalidated, clean up immediately
             eventPtr.deinitialize(count: 1)
             eventPtr.deallocate()
         }
     }
     
     private func sendFrameEvent(probability: Float, isSpeech: Bool, frame: [Float]) {
-        // Thread-safe access to callback - returns nil if invalidated
-        callbackLock.lock()
-        guard _callbackValid, let cb = _callback else {
-            callbackLock.unlock()
-            return
-        }
-        let ud = _userData
-        callbackLock.unlock()
-        
         // Allocate event on the heap
         let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
         eventPtr.initialize(to: VADEventCStruct())
@@ -598,25 +671,26 @@ class VADHandleInternal {
         eventPtr.pointee.frame_is_speech = isSpeech ? 1 : 0
         eventPtr.pointee.frame_length = Int32(frame.count)
         
-        cb(UnsafeRawPointer(eventPtr), ud)
+        var didInvoke = false
+        callbackQueue.sync {
+            guard _callbackValid, let cb = _callback else { return }
+            let ud = _userData
+            cb(UnsafeRawPointer(eventPtr), ud)
+            didInvoke = true
+        }
         
-        // Schedule cleanup
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        if didInvoke {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                eventPtr.deinitialize(count: 1)
+                eventPtr.deallocate()
+            }
+        } else {
             eventPtr.deinitialize(count: 1)
             eventPtr.deallocate()
         }
     }
     
     private func sendSpeechEndEvent(audioLength: Int32, durationMs: Int32) {
-        // Thread-safe access to callback - returns nil if invalidated
-        callbackLock.lock()
-        guard _callbackValid, let cb = _callback else {
-            callbackLock.unlock()
-            return
-        }
-        let ud = _userData
-        callbackLock.unlock()
-        
         // Allocate audio data copy that persists until Dart processes the callback
         let audioCopy = UnsafeMutablePointer<Int16>.allocate(capacity: storedSpeechEndPCM16.count)
         for (i, sample) in storedSpeechEndPCM16.enumerated() {
@@ -631,10 +705,23 @@ class VADHandleInternal {
         eventPtr.pointee.speech_end_duration_ms = durationMs
         eventPtr.pointee.speech_end_audio_data = UnsafePointer(audioCopy)
         
-        cb(UnsafeRawPointer(eventPtr), ud)
+        var didInvoke = false
+        callbackQueue.sync {
+            guard _callbackValid, let cb = _callback else { return }
+            let ud = _userData
+            cb(UnsafeRawPointer(eventPtr), ud)
+            didInvoke = true
+        }
         
-        // Schedule cleanup after Dart has processed the event
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        if didInvoke {
+            // Schedule cleanup after Dart has processed the event
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                audioCopy.deallocate()
+                eventPtr.deinitialize(count: 1)
+                eventPtr.deallocate()
+            }
+        } else {
+            // Callback was invalidated, clean up immediately
             audioCopy.deallocate()
             eventPtr.deinitialize(count: 1)
             eventPtr.deallocate()
@@ -642,15 +729,6 @@ class VADHandleInternal {
     }
     
     private func sendErrorEvent(message: String, code: Int32) {
-        // Thread-safe access to callback - returns nil if invalidated
-        callbackLock.lock()
-        guard _callbackValid, let cb = _callback else {
-            callbackLock.unlock()
-            return
-        }
-        let ud = _userData
-        callbackLock.unlock()
-        
         // Allocate error message copy
         let messageCopy = strdup(message)
         
@@ -661,10 +739,21 @@ class VADHandleInternal {
         eventPtr.pointee.error_code = code
         eventPtr.pointee.error_message = UnsafePointer(messageCopy)
         
-        cb(UnsafeRawPointer(eventPtr), ud)
+        var didInvoke = false
+        callbackQueue.sync {
+            guard _callbackValid, let cb = _callback else { return }
+            let ud = _userData
+            cb(UnsafeRawPointer(eventPtr), ud)
+            didInvoke = true
+        }
         
-        // Schedule cleanup
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        if didInvoke {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                free(messageCopy)
+                eventPtr.deinitialize(count: 1)
+                eventPtr.deallocate()
+            }
+        } else {
             free(messageCopy)
             eventPtr.deinitialize(count: 1)
             eventPtr.deallocate()
@@ -797,6 +886,12 @@ public func vad_set_callback(
     guard let h = getHandle(handle) else { return }
     h.callback = callback
     h.userData = userData
+}
+
+@_cdecl("vad_invalidate_callback")
+public func vad_invalidate_callback(_ handle: UnsafeMutableRawPointer?) {
+    guard let h = getHandle(handle) else { return }
+    h.invalidateCallback()
 }
 
 @_cdecl("vad_start")

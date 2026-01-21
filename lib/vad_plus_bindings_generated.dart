@@ -127,6 +127,19 @@ class VadPlusBindings {
         )
       >();
 
+  /// Invalidate the callback to prevent it from being invoked.
+  /// This MUST be called before closing the Dart NativeCallable to prevent crashes.
+  void vad_invalidate_callback(ffi.Pointer<VADHandle> handle) {
+    return _vad_invalidate_callback(handle);
+  }
+
+  late final _vad_invalidate_callbackPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<VADHandle>)>>(
+        'vad_invalidate_callback',
+      );
+  late final _vad_invalidate_callback = _vad_invalidate_callbackPtr
+      .asFunction<void Function(ffi.Pointer<VADHandle>)>();
+
   // ============================================================================
   // VAD Control
   // ============================================================================

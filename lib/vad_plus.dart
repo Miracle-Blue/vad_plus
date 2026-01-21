@@ -370,8 +370,15 @@ class VadPlus {
 
     stop();
 
-    // Close the native callback FIRST before destroying the handle
-    // This ensures the native side won't try to invoke a deleted callback
+    // CRITICAL: Invalidate the callback on the native side FIRST
+    // This synchronously waits for any pending callbacks to complete
+    // and prevents new callbacks from being invoked
+    if (_handle != null) {
+      _bindings.vad_invalidate_callback(_handle!);
+    }
+
+    // Now it's safe to close the native callback since no more invocations
+    // will happen from the native side
     _nativeCallback?.close();
     _nativeCallback = null;
 
