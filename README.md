@@ -1,6 +1,6 @@
 # vad_plus
 
-A new Flutter FFI plugin project.
+Voice Activity Detection
 
 ## Getting Started
 
