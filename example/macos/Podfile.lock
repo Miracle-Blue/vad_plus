@@ -34,7 +34,7 @@ SPEC CHECKSUMS:
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   onnxruntime-c: a909204639a1f035f575127ac406f781ac797c9c
   onnxruntime-objc: b6fab0f1787aa6f7190c2013f03037df4718bd8b
-  vad_plus: 856fc2a07176c4ffafa588156592a38795d6461d
+  vad_plus: eeb07517ee246ae124cf310acc5c80191a0f14d1
 
 PODFILE CHECKSUM: ba845a7a65fdaff090a632b1b7063d1db34b29e3
 
