@@ -16,13 +16,13 @@ Provides real-time speech detection with configurable thresholds and callbacks.
 
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
-  
+
   # Include the ONNX model file as a resource bundle
   s.resource_bundles = { 'vad_plus_assets' => ['Resources/*.onnx'] }
-  
+
   s.dependency 'Flutter'
   s.dependency 'onnxruntime-objc', '~> 1.18.0'
-  
+
   s.platform = :ios, '15.0'
   s.static_framework = true
 
@@ -31,11 +31,22 @@ Provides real-time speech detection with configurable thresholds and callbacks.
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
     'CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES' => 'YES',
-    'OTHER_SWIFT_FLAGS' => '-enable-experimental-feature Extern'
+    'OTHER_SWIFT_FLAGS' => '-enable-experimental-feature Extern',
+    # Preserve @_cdecl Swift FFI symbols - prevent dead code stripping
+    'OTHER_LDFLAGS' => '-all_load -ObjC',
+    'DEAD_CODE_STRIPPING' => 'NO',
+    'STRIP_INSTALLED_PRODUCT' => 'NO',
+    'PRESERVE_DEAD_CODE_INITS_AND_TERMS' => 'YES'
   }
-  
+
+  # Also set user_target_xcconfig to ensure flags are applied to the app target
+  s.user_target_xcconfig = {
+    'DEAD_CODE_STRIPPING' => 'NO',
+    'STRIP_INSTALLED_PRODUCT' => 'NO'
+  }
+
   s.swift_version = '5.0'
-  
+
   # Required for ONNX Runtime
   s.frameworks = 'Accelerate', 'AVFoundation'
 end
