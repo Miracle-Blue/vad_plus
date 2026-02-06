@@ -215,7 +215,8 @@ class VadPlus {
 
   // Static registry for hot reload cleanup
   // When a new VadPlus instance is initialized, any previous active instance
-  // is automatically disposed to prevent callback lifecycle issues during hot reload
+  // is automatically disposed to prevent callback
+  // lifecycle issues during hot reload
   static VadPlus? _previousInstance;
 
   /// Stream of VAD events.
@@ -257,7 +258,7 @@ class VadPlus {
     if (_previousInstance != null && _previousInstance != this) {
       try {
         _previousInstance!.dispose();
-      } catch (_) {
+      } on Object catch (_) {
         // Ignore errors during cleanup of previous instance
       }
     }
