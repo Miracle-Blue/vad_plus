@@ -4,7 +4,7 @@ group = "dev.miracle.vad_plus"
 version = "1.0"
 
 buildscript {
-    ext.kotlin_version = "1.9.22"
+    ext.kotlin_version = "2.2.0"
     repositories {
         google()
         mavenCentral()
@@ -12,7 +12,7 @@ buildscript {
 
     dependencies {
         // The Android Gradle Plugin knows how to build native code with the NDK.
-        classpath("com.android.tools.build:gradle:8.11.1")
+        classpath("com.android.tools.build:gradle:8.11.2")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
@@ -81,5 +81,5 @@ android {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-    implementation "com.microsoft.onnxruntime:onnxruntime-android:1.16.3"
+    implementation "com.microsoft.onnxruntime:onnxruntime-android:1.24.1"
 }
