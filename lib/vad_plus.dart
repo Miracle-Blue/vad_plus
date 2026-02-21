@@ -580,21 +580,8 @@ Float32List pcm16ToFloat(Int16List pcm16Samples) {
 // Library Loading
 // ============================================================================
 
-const String _libName = 'vad_plus';
-
 /// The dynamic library in which the symbols for [VadPlusBindings] can be found.
 final DynamicLibrary _dylib = () {
-  if (Platform.isMacOS || Platform.isIOS) {
-    // On iOS/macOS, the Swift FFI functions are statically linked into
-    // the main app binary, so we use process() to look up symbols.
-    return DynamicLibrary.process();
-  }
-  if (Platform.isAndroid || Platform.isLinux) {
-    return DynamicLibrary.open('lib$_libName.so');
-  }
-  if (Platform.isWindows) {
-    return DynamicLibrary.open('$_libName.dll');
-  }
   throw UnsupportedError('Unknown platform: ${Platform.operatingSystem}');
 }();
 
