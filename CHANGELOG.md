@@ -1,3 +1,7 @@
+## 0.2.0
+
+- Require Dart SDK ^3.9.0
+
 ## 0.1.2
 
 - Update `ffi` dependency to ^2.2.0
