@@ -23,7 +23,11 @@ class MyApp extends StatefulWidget {
 
 /// Represents a recorded voice segment
 class RecordedVoice {
-  RecordedVoice({required this.audioData, required this.durationMs, required this.timestamp});
+  RecordedVoice({
+    required this.audioData,
+    required this.durationMs,
+    required this.timestamp,
+  });
 
   final Int16List audioData;
   final int durationMs;
@@ -97,7 +101,11 @@ class _MyAppState extends State<MyApp> {
 
       // Initialize with default v6 16kHz configuration
       await _vad!.initialize(
-        config: const VadConfig(isDebug: true, positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35),
+        config: const VadConfig(
+          isDebug: true,
+          positiveSpeechThreshold: 0.5,
+          negativeSpeechThreshold: 0.35,
+        ),
       );
 
       setState(() {
@@ -112,7 +120,11 @@ class _MyAppState extends State<MyApp> {
         _addLog('❌ Init error: $e');
       });
     } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'initialize VAD', level: 100);
+      log(
+        '${(stopwatch..stop()).elapsedMicroseconds} μs',
+        name: 'initialize VAD',
+        level: 100,
+      );
     }
   }
 
@@ -145,7 +157,11 @@ class _MyAppState extends State<MyApp> {
         _addLog('❌ Start error: $e');
       });
     } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'start VAD', level: 100);
+      log(
+        '${(stopwatch..stop()).elapsedMicroseconds} μs',
+        name: 'start VAD',
+        level: 100,
+      );
     }
   }
 
@@ -163,7 +179,11 @@ class _MyAppState extends State<MyApp> {
         _addLog('⏹️ Stopped listening');
       });
     } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'stop VAD', level: 100);
+      log(
+        '${(stopwatch..stop()).elapsedMicroseconds} μs',
+        name: 'stop VAD',
+        level: 100,
+      );
     }
   }
 
@@ -181,7 +201,11 @@ class _MyAppState extends State<MyApp> {
       _statusMessage = 'Not initialized';
       _addLog('❌ VAD stopped and disposed');
     } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'stop and dispose VAD', level: 100);
+      log(
+        '${(stopwatch..stop()).elapsedMicroseconds} μs',
+        name: 'stop and dispose VAD',
+        level: 100,
+      );
     }
   }
 
@@ -199,7 +223,11 @@ class _MyAppState extends State<MyApp> {
         _addLog('🗣️ Speech started');
 
         if (musicHandle != null) {
-          SoLoud.instance.fadeVolume(musicHandle!, 0.3, Duration(milliseconds: 100));
+          SoLoud.instance.fadeVolume(
+            musicHandle!,
+            0.3,
+            Duration(milliseconds: 100),
+          );
         }
 
         break;
@@ -208,18 +236,29 @@ class _MyAppState extends State<MyApp> {
         setState(() {
           _isSpeaking = false;
           _speechSegmentCount++;
-          _statusMessage = '✅ Speech ended (${event.durationMs}ms, ${event.audioData.length} samples)';
+          _statusMessage =
+              '✅ Speech ended (${event.durationMs}ms, ${event.audioData.length} samples)';
 
           // Store the recorded voice segment
           _recordedVoices.insert(
             0,
-            RecordedVoice(audioData: event.audioData, durationMs: event.durationMs, timestamp: DateTime.now()),
+            RecordedVoice(
+              audioData: event.audioData,
+              durationMs: event.durationMs,
+              timestamp: DateTime.now(),
+            ),
           );
         });
-        _addLog('🔇 Speech ended: ${event.durationMs}ms, ${event.audioData.length} samples');
+        _addLog(
+          '🔇 Speech ended: ${event.durationMs}ms, ${event.audioData.length} samples',
+        );
 
         if (musicHandle != null) {
-          SoLoud.instance.fadeVolume(musicHandle!, 1.0, Duration(milliseconds: 500));
+          SoLoud.instance.fadeVolume(
+            musicHandle!,
+            1.0,
+            Duration(milliseconds: 500),
+          );
         }
 
         break;
@@ -243,7 +282,11 @@ class _MyAppState extends State<MyApp> {
         _addLog('⚡ Misfire - speech too short');
 
         if (musicHandle != null) {
-          SoLoud.instance.fadeVolume(musicHandle!, 1.0, Duration(milliseconds: 500));
+          SoLoud.instance.fadeVolume(
+            musicHandle!,
+            1.0,
+            Duration(milliseconds: 500),
+          );
         }
 
         break;
@@ -278,7 +321,9 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _playRecordedVoice(RecordedVoice voice) async {
-    log('_playRecordedVoice called, audioData length: ${voice.audioData.length}');
+    log(
+      '_playRecordedVoice called, audioData length: ${voice.audioData.length}',
+    );
 
     // Check if SoLoud is initialized
     if (!SoLoud.instance.isInitialized) {
@@ -396,13 +441,23 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       theme: ThemeData.dark().copyWith(
-        colorScheme: ColorScheme.dark(primary: Colors.teal, secondary: Colors.tealAccent, surface: Colors.grey[900]!),
+        colorScheme: ColorScheme.dark(
+          primary: Colors.teal,
+          secondary: Colors.tealAccent,
+          surface: Colors.grey[900]!,
+        ),
       ),
       home: Scaffold(
         appBar: AppBar(
           title: const Text('VAD Plus Demo'),
           backgroundColor: Colors.grey[850],
-          actions: [IconButton(icon: const Icon(Icons.delete_outline), onPressed: _clearLog, tooltip: 'Clear log')],
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _clearLog,
+              tooltip: 'Clear log',
+            ),
+          ],
         ),
         body: Column(
           children: [
@@ -413,7 +468,10 @@ class _MyAppState extends State<MyApp> {
               decoration: BoxDecoration(
                 color: Colors.grey[850],
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _isSpeaking ? Colors.green : Colors.grey[700]!, width: 2),
+                border: Border.all(
+                  color: _isSpeaking ? Colors.green : Colors.grey[700]!,
+                  width: 2,
+                ),
               ),
               child: Column(
                 children: [
@@ -443,7 +501,11 @@ class _MyAppState extends State<MyApp> {
                   const SizedBox(height: 16),
 
                   // Status message
-                  Text(_statusMessage, style: const TextStyle(fontSize: 16), textAlign: TextAlign.center),
+                  Text(
+                    _statusMessage,
+                    style: const TextStyle(fontSize: 16),
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 16),
 
                   // Probability bar
@@ -456,12 +518,16 @@ class _MyAppState extends State<MyApp> {
                             value: _currentProbability,
                             backgroundColor: Colors.grey[800],
                             valueColor: AlwaysStoppedAnimation<Color>(
-                              _currentProbability >= 0.5 ? Colors.green : Colors.grey,
+                              _currentProbability >= 0.5
+                                  ? Colors.green
+                                  : Colors.grey,
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('${(_currentProbability * 100).toStringAsFixed(0)}%'),
+                        Text(
+                          '${(_currentProbability * 100).toStringAsFixed(0)}%',
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -482,7 +548,9 @@ class _MyAppState extends State<MyApp> {
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isInitialized ? _stopAndDispose : _initializeVad,
+                      onPressed: _isInitialized
+                          ? _stopAndDispose
+                          : _initializeVad,
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('Initialize/Dispose'),
                       style: ElevatedButton.styleFrom(
@@ -503,7 +571,9 @@ class _MyAppState extends State<MyApp> {
                       icon: Icon(_isListening ? Icons.stop : Icons.mic),
                       label: Text(_isListening ? 'Stop' : 'Start'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _isListening ? Colors.red : Colors.blue,
+                        backgroundColor: _isListening
+                            ? Colors.red
+                            : Colors.blue,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
@@ -527,14 +597,20 @@ class _MyAppState extends State<MyApp> {
                     });
                   } else {
                     log('Loading music...', name: 'play music', level: 100);
-                    final musicSource = await SoLoud.instance.loadAsset('assets/music/skyfall.mp3');
+                    final musicSource = await SoLoud.instance.loadAsset(
+                      'assets/music/skyfall.mp3',
+                    );
                     musicHandle = await SoLoud.instance.play(musicSource);
                     setState(() {
                       _isPlaying = true;
                     });
                   }
                 } on Object catch (error, stackTrace) {
-                  log('Error: $error, stackTrace: $stackTrace', name: 'play music', level: 100);
+                  log(
+                    'Error: $error, stackTrace: $stackTrace',
+                    name: 'play music',
+                    level: 100,
+                  );
                 }
               },
               child: const Text('Play/Stop Music'),
@@ -547,7 +623,10 @@ class _MyAppState extends State<MyApp> {
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16),
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+                  color: Colors.grey[850],
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -556,29 +635,46 @@ class _MyAppState extends State<MyApp> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.record_voice_over, color: Colors.tealAccent, size: 20),
+                            const Icon(
+                              Icons.record_voice_over,
+                              color: Colors.tealAccent,
+                              size: 20,
+                            ),
                             const SizedBox(width: 8),
                             const Text(
                               'Recorded Voices',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent),
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.tealAccent,
+                              ),
                             ),
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.tealAccent.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
                                 '${_recordedVoices.length}',
-                                style: const TextStyle(color: Colors.tealAccent, fontSize: 12),
+                                style: const TextStyle(
+                                  color: Colors.tealAccent,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ],
                         ),
                         if (_recordedVoices.isNotEmpty)
                           IconButton(
-                            icon: const Icon(Icons.delete_sweep, color: Colors.redAccent, size: 20),
+                            icon: const Icon(
+                              Icons.delete_sweep,
+                              color: Colors.redAccent,
+                              size: 20,
+                            ),
                             onPressed: _clearRecordedVoices,
                             tooltip: 'Clear all recordings',
                             padding: EdgeInsets.zero,
@@ -593,7 +689,10 @@ class _MyAppState extends State<MyApp> {
                               child: Text(
                                 'No recordings yet.\nSpeak while listening to capture audio.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 13,
+                                ),
                               ),
                             )
                           : ListView.builder(
@@ -605,36 +704,55 @@ class _MyAppState extends State<MyApp> {
                                     '${voice.timestamp.minute.toString().padLeft(2, '0')}:'
                                     '${voice.timestamp.second.toString().padLeft(2, '0')}';
                                 return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                  ),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: voice.isPlaying
-                                          ? Colors.tealAccent.withValues(alpha: 0.15)
+                                          ? Colors.tealAccent.withValues(
+                                              alpha: 0.15,
+                                            )
                                           : Colors.black45,
                                       borderRadius: BorderRadius.circular(8),
                                       border: voice.isPlaying
-                                          ? Border.all(color: Colors.tealAccent.withValues(alpha: 0.5))
+                                          ? Border.all(
+                                              color: Colors.tealAccent
+                                                  .withValues(alpha: 0.5),
+                                            )
                                           : null,
                                     ),
                                     child: Row(
                                       children: [
                                         // Play/Stop button
                                         GestureDetector(
-                                          onTap: () => _playRecordedVoice(voice),
+                                          onTap: () =>
+                                              _playRecordedVoice(voice),
                                           child: AnimatedContainer(
-                                            duration: const Duration(milliseconds: 200),
+                                            duration: const Duration(
+                                              milliseconds: 200,
+                                            ),
                                             width: 36,
                                             height: 36,
                                             decoration: BoxDecoration(
                                               shape: BoxShape.circle,
                                               color: voice.isPlaying
                                                   ? Colors.tealAccent
-                                                  : Colors.teal.withValues(alpha: 0.3),
+                                                  : Colors.teal.withValues(
+                                                      alpha: 0.3,
+                                                    ),
                                             ),
                                             child: Icon(
-                                              voice.isPlaying ? Icons.stop : Icons.play_arrow,
-                                              color: voice.isPlaying ? Colors.black : Colors.tealAccent,
+                                              voice.isPlaying
+                                                  ? Icons.stop
+                                                  : Icons.play_arrow,
+                                              color: voice.isPlaying
+                                                  ? Colors.black
+                                                  : Colors.tealAccent,
                                               size: 20,
                                             ),
                                           ),
@@ -643,27 +761,38 @@ class _MyAppState extends State<MyApp> {
                                         // Voice info
                                         Expanded(
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
                                                 'Voice #${_recordedVoices.length - index}',
                                                 style: TextStyle(
-                                                  color: voice.isPlaying ? Colors.tealAccent : Colors.white,
+                                                  color: voice.isPlaying
+                                                      ? Colors.tealAccent
+                                                      : Colors.white,
                                                   fontWeight: FontWeight.w500,
                                                 ),
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
                                                 '$timeStr • ${voice.durationMs}ms • ${(voice.audioData.length / 16).toStringAsFixed(0)}ms',
-                                                style: TextStyle(color: Colors.grey[400], fontSize: 11),
+                                                style: TextStyle(
+                                                  color: Colors.grey[400],
+                                                  fontSize: 11,
+                                                ),
                                               ),
                                             ],
                                           ),
                                         ),
                                         // Delete button
                                         IconButton(
-                                          icon: Icon(Icons.close, color: Colors.grey[500], size: 18),
-                                          onPressed: () => _deleteRecordedVoice(voice),
+                                          icon: Icon(
+                                            Icons.close,
+                                            color: Colors.grey[500],
+                                            size: 18,
+                                          ),
+                                          onPressed: () =>
+                                              _deleteRecordedVoice(voice),
                                           padding: EdgeInsets.zero,
                                           constraints: const BoxConstraints(),
                                           tooltip: 'Delete',
@@ -687,13 +816,19 @@ class _MyAppState extends State<MyApp> {
               child: Container(
                 margin: const EdgeInsets.all(16),
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       'Event Log',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.tealAccent,
+                      ),
                     ),
                     const Divider(color: Colors.grey),
                     Expanded(
@@ -704,7 +839,11 @@ class _MyAppState extends State<MyApp> {
                             padding: const EdgeInsets.symmetric(vertical: 2),
                             child: Text(
                               _eventLog[index],
-                              style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.grey[300]),
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                color: Colors.grey[300],
+                              ),
                             ),
                           );
                         },
