@@ -1,39 +1,66 @@
 part of '../screen/home_screen.dart';
 
-/// Represents a recorded voice segment
+/// An immutable speech segment captured by the VAD.
 class RecordedVoice {
-  RecordedVoice({required this.audioData, required this.durationMs, required this.timestamp});
+  const RecordedVoice({required this.audioData, required this.durationMs, required this.timestamp});
 
   final Int16List audioData;
   final int durationMs;
   final DateTime timestamp;
-  bool isPlaying = false;
-  AudioSource? audioSource;
-  SoundHandle? soundHandle;
+
+  /// Audio length in ms (samples ÷ 16 kHz).
+  int get audioMs => audioData.length ~/ 16;
 }
 
 /// State for widget HomeScreen.
 abstract class HomeScreenState extends State<HomeScreen> {
+  static const int _maxLogEntries = 50;
+
+  // VAD
   VadPlus? _vad;
   StreamSubscription<VadEvent>? _eventSubscription;
 
+  // Low-frequency UI state (setState-driven)
   bool _isInitialized = false;
   bool _isListening = false;
   bool _isSpeaking = false;
-  double _currentProbability = 0.0;
   String _statusMessage = 'Not initialized';
-  final List<String> _eventLog = [];
   int _speechSegmentCount = 0;
+  final List<String> _eventLog = [];
 
-  bool _isPlaying = false;
-  SoundHandle? musicHandle;
+  /// Speech probability, updated ~31×/s — a [ValueNotifier] so only the
+  /// probability bar rebuilds per frame, not the whole screen.
+  final ValueNotifier<double> _probability = ValueNotifier<double>(0);
 
-  // Recorded voices storage
+  // Background music
+  SoundHandle? _musicHandle;
+  bool _isMusicPlaying = false;
+
+  // Voice playback (single slot — only one voice plays at a time)
+  RecordedVoice? _playingVoice;
+  AudioSource? _voiceSource;
+  SoundHandle? _voiceHandle;
+
   final List<RecordedVoice> _recordedVoices = [];
 
+  @override
+  void initState() {
+    super.initState();
+    _initSoLoud();
+  }
+
+  @override
+  void dispose() {
+    _disposeVad();
+    _probability.dispose();
+    super.dispose();
+  }
+
+  /* #region VAD */
+
   Future<void> _initSoLoud() async {
-    // On macOS sandboxed apps, we need to ensure the cache directory exists
-    // before SoLoud.init() because flutter_soloud doesn't create parent dirs
+    // On macOS sandboxed apps, ensure the cache directory exists before
+    // SoLoud.init() because flutter_soloud doesn't create parent dirs.
     if (Platform.isMacOS) {
       try {
         final cacheDir = await getApplicationCacheDirectory();
@@ -53,14 +80,13 @@ abstract class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeVad() async {
-    final stopwatch = Stopwatch()..start();
     try {
       _vad = VadPlus();
 
-      // Subscribe to VAD events
+      // Subscribe before initialize() so no event is missed.
       _eventSubscription = _vad!.events.listen(_handleVadEvent);
 
-      // Initialize with default v6 16kHz configuration
+      // Default v6 16 kHz configuration.
       await _vad!.initialize(
         config: const VadConfig(isDebug: true, positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35),
       );
@@ -68,93 +94,78 @@ abstract class HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isInitialized = true;
         _statusMessage = 'Initialized - Ready to start';
-        _addLog('✅ VAD initialized');
       });
+      _addLog('✅ VAD initialized');
     } catch (e) {
       log(e.toString());
-      setState(() {
-        _statusMessage = 'Error: $e';
-        _addLog('❌ Init error: $e');
-      });
-    } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'initialize VAD', level: 100);
+      setState(() => _statusMessage = 'Error: $e');
+      _addLog('❌ Init error: $e');
     }
   }
 
   Future<void> _startListening() async {
     if (!_isInitialized || _vad == null) return;
 
-    // Request microphone permission (not supported on macOS - permission is requested automatically)
+    // Request microphone permission (macOS prompts automatically via its entitlement).
     if (!kIsWeb && !Platform.isMacOS) {
       final status = await Permission.microphone.request();
       if (!status.isGranted) {
-        setState(() {
-          _statusMessage = 'Microphone permission denied';
-          _addLog('❌ Microphone permission denied');
-        });
+        setState(() => _statusMessage = 'Microphone permission denied');
+        _addLog('❌ Microphone permission denied');
         return;
       }
     }
 
-    final stopwatch = Stopwatch()..start();
     try {
       await _vad!.start();
       setState(() {
         _isListening = true;
         _statusMessage = 'Listening for speech...';
-        _addLog('🎤 Started listening');
       });
+      _addLog('🎤 Started listening');
     } catch (e) {
-      setState(() {
-        _statusMessage = 'Start error: $e';
-        _addLog('❌ Start error: $e');
-      });
-    } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'start VAD', level: 100);
+      setState(() => _statusMessage = 'Start error: $e');
+      _addLog('❌ Start error: $e');
     }
   }
 
   void _stopListening() {
-    final stopwatch = Stopwatch()..start();
-    try {
-      if (_vad == null) return;
+    if (_vad == null) return;
 
-      _vad!.stop();
-      setState(() {
-        _isListening = false;
-        _isSpeaking = false;
-        _currentProbability = 0.0;
-        _statusMessage = 'Stopped - Ready to start';
-        _addLog('⏹️ Stopped listening');
-      });
-    } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'stop VAD', level: 100);
-    }
+    _vad!.stop();
+    _probability.value = 0;
+    setState(() {
+      _isListening = false;
+      _isSpeaking = false;
+      _statusMessage = 'Stopped - Ready to start';
+    });
+    _addLog('⏹️ Stopped listening');
+  }
+
+  /// Pure teardown — safe to call from [dispose] (no setState, no logging).
+  void _disposeVad() {
+    _eventSubscription?.cancel();
+    _eventSubscription = null;
+    _vad?.dispose();
+    _vad = null;
   }
 
   void _stopAndDispose() {
-    final stopwatch = Stopwatch()..start();
-    try {
-      _eventSubscription?.cancel();
-      _vad?.dispose();
-      _vad = null;
-
+    _disposeVad();
+    _probability.value = 0;
+    setState(() {
       _isInitialized = false;
       _isListening = false;
       _isSpeaking = false;
-      _currentProbability = 0.0;
       _statusMessage = 'Not initialized';
-      _addLog('❌ VAD stopped and disposed');
-    } finally {
-      log('${(stopwatch..stop()).elapsedMicroseconds} μs', name: 'stop and dispose VAD', level: 100);
-    }
+    });
+    _addLog('❌ VAD stopped and disposed');
   }
 
   void _handleVadEvent(VadEvent event) {
     switch (event) {
       case VadInitialized():
         _addLog('📢 Event: Initialized');
-        break;
 
       case VadSpeechStart():
         setState(() {
@@ -162,43 +173,26 @@ abstract class HomeScreenState extends State<HomeScreen> {
           _statusMessage = '🗣️ Speech detected...';
         });
         _addLog('🗣️ Speech started');
+        _duckMusic();
 
-        if (musicHandle != null) {
-          SoLoud.instance.fadeVolume(musicHandle!, 0.3, Duration(milliseconds: 100));
-        }
-
-        break;
-
-      case VadSpeechEnd():
+      case VadSpeechEnd(:final audioData, :final durationMs):
         setState(() {
           _isSpeaking = false;
           _speechSegmentCount++;
-          _statusMessage = '✅ Speech ended (${event.durationMs}ms, ${event.audioData.length} samples)';
-
-          // Store the recorded voice segment
+          _statusMessage = '✅ Speech ended (${durationMs}ms, ${audioData.length} samples)';
           _recordedVoices.insert(
             0,
-            RecordedVoice(audioData: event.audioData, durationMs: event.durationMs, timestamp: DateTime.now()),
+            RecordedVoice(audioData: audioData, durationMs: durationMs, timestamp: DateTime.now()),
           );
         });
-        _addLog('🔇 Speech ended: ${event.durationMs}ms, ${event.audioData.length} samples');
+        _addLog('🔇 Speech ended: ${durationMs}ms, ${audioData.length} samples');
+        _restoreMusic();
 
-        if (musicHandle != null) {
-          SoLoud.instance.fadeVolume(musicHandle!, 1.0, Duration(milliseconds: 500));
-        }
-
-        break;
-
-      case VadFrameProcessed():
-        setState(() {
-          _currentProbability = event.probability;
-          // _addLog('📢 Frame processed: ${event.probability}, ${event.audioData.length} samples');
-        });
-        break;
+      case VadFrameProcessed(:final probability):
+        _probability.value = probability;
 
       case VadRealSpeechStart():
         _addLog('✨ Real speech confirmed');
-        break;
 
       case VadMisfire():
         setState(() {
@@ -206,185 +200,154 @@ abstract class HomeScreenState extends State<HomeScreen> {
           _statusMessage = '⚡ Misfire (too short)';
         });
         _addLog('⚡ Misfire - speech too short');
+        _restoreMusic();
 
-        if (musicHandle != null) {
-          SoLoud.instance.fadeVolume(musicHandle!, 1.0, Duration(milliseconds: 500));
-        }
-
-        break;
-
-      case VadError():
-        setState(() {
-          _statusMessage = '❌ Error: ${event.message}';
-        });
-        _addLog('❌ Error: ${event.message} (code: ${event.code})');
-        break;
+      case VadError(:final message, :final code):
+        setState(() => _statusMessage = '❌ Error: $message');
+        _addLog('❌ Error: $message (code: $code)');
 
       case VadStopped():
         _addLog('⏹️ VAD stopped');
-        break;
     }
   }
 
-  void _addLog(String message) {
-    setState(() {
-      final timestamp = DateTime.now().toString().substring(11, 19);
-      _eventLog.insert(0, '[$timestamp] $message');
-      if (_eventLog.length > 50) {
-        _eventLog.removeLast();
+  /* #endregion */
+
+  /* #region Music */
+
+  Future<void> _toggleMusic() async {
+    try {
+      if (_isMusicPlaying) {
+        if (_musicHandle case final handle?) {
+          await SoLoud.instance.stop(handle);
+        }
+        _musicHandle = null;
+        setState(() => _isMusicPlaying = false);
+      } else {
+        final source = await SoLoud.instance.loadAsset('assets/music/skyfall.mp3');
+        _musicHandle = await SoLoud.instance.play(source);
+        setState(() => _isMusicPlaying = true);
       }
-    });
+    } on Object catch (error, stackTrace) {
+      log('Error: $error, stackTrace: $stackTrace', name: 'play music', level: 100);
+    }
   }
 
-  void _clearLog() {
-    setState(() {
-      _eventLog.clear();
-    });
+  void _duckMusic() {
+    if (_musicHandle case final handle?) {
+      SoLoud.instance.fadeVolume(handle, 0.3, const Duration(milliseconds: 100));
+    }
   }
+
+  void _restoreMusic() {
+    if (_musicHandle case final handle?) {
+      SoLoud.instance.fadeVolume(handle, 1.0, const Duration(milliseconds: 500));
+    }
+  }
+
+  /* #endregion */
+
+  /* #region Recorded voices */
 
   Future<void> _playRecordedVoice(RecordedVoice voice) async {
-    log('_playRecordedVoice called, audioData length: ${voice.audioData.length}');
-
-    // Check if SoLoud is initialized
     if (!SoLoud.instance.isInitialized) {
       _addLog('❌ SoLoud not initialized');
-      log('SoLoud not initialized');
       return;
     }
 
+    // Tapping the playing voice stops it; tapping another switches to it.
+    final wasPlaying = identical(voice, _playingVoice);
+    await _stopPlayback();
+    if (wasPlaying) return;
+
     try {
-      // Stop any currently playing recorded voice
-      for (final v in _recordedVoices) {
-        if (v.isPlaying && v != voice) {
-          await _stopRecordedVoice(v);
-        }
-      }
-
-      if (voice.isPlaying) {
-        await _stopRecordedVoice(voice);
-        return;
-      }
-
-      // Create a buffer stream for the audio data (16kHz mono PCM16)
-      // Add extra buffer space to avoid "buffer full" errors due to internal overhead
-      final bufferSize = voice.audioData.lengthInBytes + 4096;
-      log('Creating buffer stream with size: $bufferSize bytes');
-
-      final audioSource = SoLoud.instance.setBufferStream(
+      // 16 kHz mono PCM16 — matches the VAD segment format.
+      final source = SoLoud.instance.setBufferStream(
         bufferingTimeNeeds: 1,
         bufferingType: BufferingType.released,
         sampleRate: 16000,
         channels: Channels.mono,
         format: BufferType.s16le,
       );
-      log('Buffer stream created: $audioSource');
-
-      // Add the audio data to the stream
-      final audioBytes = voice.audioData.buffer.asUint8List();
-      log('Adding ${audioBytes.length} bytes to stream');
-      SoLoud.instance.addAudioDataStream(audioSource, audioBytes);
-      log('Audio data added');
-
-      // Mark the stream as complete
-      SoLoud.instance.setDataIsEnded(audioSource);
-      log('Stream marked as ended');
-
-      // Play the audio
-      final handle = await SoLoud.instance.play(audioSource);
-      log('Playing with handle: $handle');
+      SoLoud.instance.addAudioDataStream(source, voice.audioData.buffer.asUint8List());
+      SoLoud.instance.setDataIsEnded(source);
+      final handle = await SoLoud.instance.play(source);
 
       setState(() {
-        voice.audioSource = audioSource;
-        voice.soundHandle = handle;
-        voice.isPlaying = true;
+        _playingVoice = voice;
+        _voiceSource = source;
+        _voiceHandle = handle;
       });
-
       _addLog('▶️ Playing recorded voice (${voice.durationMs}ms)');
 
-      // Auto-stop when playback finishes
-      Future.delayed(Duration(milliseconds: voice.durationMs + 100), () {
-        if (voice.isPlaying && mounted) {
-          _stopRecordedVoice(voice);
-        }
-      });
+      // Auto-stop when playback finishes. The stream closes without an event
+      // when the source is disposed by a manual stop — hence the empty onError.
+      unawaited(
+        source.allInstancesFinished.first.then((_) {
+          if (mounted && identical(_playingVoice, voice)) _stopPlayback();
+        }, onError: (Object _) {}),
+      );
     } catch (e, stackTrace) {
       log('Error playing recorded voice: $e\n$stackTrace');
       _addLog('❌ Playback error: $e');
     }
   }
 
-  Future<void> _stopRecordedVoice(RecordedVoice voice) async {
+  Future<void> _stopPlayback() async {
+    final handle = _voiceHandle;
+    final source = _voiceSource;
+    if (_playingVoice == null && handle == null && source == null) return;
+
+    // Clear the slot first so the finished-event callback can't re-enter.
+    if (mounted) {
+      setState(() {
+        _playingVoice = null;
+        _voiceHandle = null;
+        _voiceSource = null;
+      });
+    } else {
+      _playingVoice = null;
+      _voiceHandle = null;
+      _voiceSource = null;
+    }
+
     try {
-      if (voice.soundHandle != null) {
-        await SoLoud.instance.stop(voice.soundHandle!);
-      }
-      if (voice.audioSource != null) {
-        await SoLoud.instance.disposeSource(voice.audioSource!);
-      }
+      if (handle != null) await SoLoud.instance.stop(handle);
+      if (source != null) await SoLoud.instance.disposeSource(source);
     } catch (e) {
       log('Error stopping recorded voice: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          voice.isPlaying = false;
-          voice.soundHandle = null;
-          voice.audioSource = null;
-        });
-      }
     }
-  }
-
-  void _clearRecordedVoices() {
-    // Stop all playing voices first
-    for (final voice in _recordedVoices) {
-      if (voice.isPlaying) {
-        _stopRecordedVoice(voice);
-      }
-    }
-    setState(() {
-      _recordedVoices.clear();
-    });
-    _addLog('🗑️ Cleared all recorded voices');
   }
 
   void _deleteRecordedVoice(RecordedVoice voice) {
-    if (voice.isPlaying) {
-      _stopRecordedVoice(voice);
-    }
-    setState(() {
-      _recordedVoices.remove(voice);
-    });
+    if (identical(voice, _playingVoice)) unawaited(_stopPlayback());
+    setState(() => _recordedVoices.remove(voice));
     _addLog('🗑️ Deleted recorded voice');
   }
 
-  /* #region Lifecycle */
-  @override
-  void initState() {
-    super.initState();
-
-    _isPlaying = false;
-
-    _initSoLoud();
+  void _clearRecordedVoices() {
+    unawaited(_stopPlayback());
+    setState(() => _recordedVoices.clear());
+    _addLog('🗑️ Cleared all recorded voices');
   }
 
-  @override
-  void didUpdateWidget(covariant HomeScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Widget configuration changed
+  /* #endregion */
+
+  /* #region Event log */
+
+  static String _hhmmss(DateTime time) => time.toString().substring(11, 19);
+
+  void _addLog(String message) {
+    if (!mounted) return;
+    setState(() {
+      _eventLog.insert(0, '[${_hhmmss(DateTime.now())}] $message');
+      if (_eventLog.length > _maxLogEntries) {
+        _eventLog.removeLast();
+      }
+    });
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // The configuration of InheritedWidgets has changed
-    // Also called after initState but before build
-  }
-
-  @override
-  void dispose() {
-    _stopAndDispose();
-    super.dispose();
-  }
+  void _clearLog() => setState(_eventLog.clear);
 
   /* #endregion */
 }
