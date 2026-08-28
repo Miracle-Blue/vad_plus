@@ -60,55 +60,44 @@ typedef enum VADEventType
 } VADEventType;
 
 // ============================================================================
-// VAD Event Data Structures
+// VAD Event Structure
 // ============================================================================
 
-/// Frame processed event data
-typedef struct VADFrameData
+/// VAD Event structure.
+///
+/// Flat layout — this must match the structs actually emitted by the native
+/// implementations (`VADEventCStruct` in ios/macos VadPlusFFI.swift and
+/// `VADEventC` in android vad_plus_jni.cpp) and the generated Dart bindings.
+/// Only the fields relevant to the current `type` are populated; the rest
+/// are zero/NULL.
+typedef struct VADEvent
 {
+    /// One of the VADEventType values
+    int32_t type;
+
+    // VAD_EVENT_FRAME_PROCESSED
     /// Speech probability (0.0 - 1.0)
-    float probability;
+    float frame_probability;
     /// Whether current frame is speech (0 = false, 1 = true)
-    int32_t is_speech;
+    int32_t frame_is_speech;
     /// Pointer to frame audio data (float32)
     const float *frame_data;
     /// Number of samples in frame
     int32_t frame_length;
-} VADFrameData;
 
-/// Speech end event data
-typedef struct VADSpeechEndData
-{
+    // VAD_EVENT_SPEECH_END
     /// Pointer to PCM16 audio data
-    const int16_t *audio_data;
+    const int16_t *speech_end_audio_data;
     /// Number of samples
-    int32_t audio_length;
+    int32_t speech_end_audio_length;
     /// Duration in milliseconds
-    int32_t duration_ms;
-} VADSpeechEndData;
+    int32_t speech_end_duration_ms;
 
-/// Error event data
-typedef struct VADErrorData
-{
+    // VAD_EVENT_ERROR
     /// Error message
-    const char *message;
+    const char *error_message;
     /// Error code
-    int32_t code;
-} VADErrorData;
-
-/// Union for event data
-typedef union VADEventData
-{
-    VADFrameData frame;
-    VADSpeechEndData speech_end;
-    VADErrorData error;
-} VADEventData;
-
-/// VAD Event structure
-typedef struct VADEvent
-{
-    VADEventType type;
-    VADEventData data;
+    int32_t error_code;
 } VADEvent;
 
 // ============================================================================

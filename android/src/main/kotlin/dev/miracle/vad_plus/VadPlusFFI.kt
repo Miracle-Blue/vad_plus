@@ -497,7 +497,7 @@ class VADHandleInternal {
     internal fun emitSpeechEnd() {
         // Keep audio up to the last voiced frame plus endSpeechPadFrames of
         // padding; the rest of the redemption-window silence is trimmed.
-        val endPadSamples = config.endSpeechPadFrames * config.frameSamples
+        val endPadSamples = maxOf(0, config.endSpeechPadFrames) * config.frameSamples
         val keepSamples = minOf(speechBuffer.size, samplesAtLastVoice + endPadSamples)
         val finalBuffer = speechBuffer.take(keepSamples)
         

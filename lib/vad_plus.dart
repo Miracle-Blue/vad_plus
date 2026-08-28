@@ -211,7 +211,7 @@ class VadPlus {
   bool _isDisposed = false;
 
   // Native callback for receiving events from the native side
-  NativeCallable<VADEventCallbackNative>? _nativeCallback;
+  NativeCallable<VADEventCallbackFunction>? _nativeCallback;
 
   // Static registry for hot reload cleanup
   // When a new VadPlus instance is initialized, any previous active instance
@@ -231,7 +231,7 @@ class VadPlus {
   /// Whether speech is currently being detected.
   bool get isSpeaking {
     if (_handle == null) return false;
-    return _bindings.vad_is_speaking(_handle!);
+    return _bindings.vad_is_speaking(_handle!) != 0;
   }
 
   /// Initialize the VAD with the given configuration.
@@ -304,6 +304,7 @@ class VadPlus {
       );
       if (result != 0) {
         final error = _getLastError();
+        _abortFailedInitialize();
         throw Exception('Failed to initialize VAD (code: $result): $error');
       }
       _isInitialized = true;
@@ -420,6 +421,25 @@ class VadPlus {
     }
   }
 
+  /// Releases the handle and callback created by a failed [initialize] so the
+  /// instance does not leak native resources and can be retried.
+  void _abortFailedInitialize() {
+    // Same teardown order as dispose(): invalidate -> close -> destroy.
+    final handle = _handle;
+    if (handle != null) {
+      _bindings.vad_invalidate_callback(handle);
+    }
+    _nativeCallback?.close();
+    _nativeCallback = null;
+    if (handle != null) {
+      _bindings.vad_destroy(handle);
+    }
+    _handle = null;
+    if (_activeInstance == this) {
+      _activeInstance = null;
+    }
+  }
+
   String _getLastError() {
     if (_handle == null) return 'Unknown error';
     final errorPtr = _bindings.vad_get_last_error(_handle!);
@@ -432,7 +452,7 @@ class VadPlus {
     // Using listener so the callback can be invoked from any thread (including
     // the native audio processing thread). The callback will be scheduled on
     // the Dart event loop.
-    _nativeCallback = NativeCallable<VADEventCallbackNative>.listener(
+    _nativeCallback = NativeCallable<VADEventCallbackFunction>.listener(
       _onNativeEvent,
     );
 
@@ -465,12 +485,16 @@ class VadPlus {
   static VadPlus? _activeInstance;
 
   void _processNativeEvent(VADEvent event) {
-    switch (event.type) {
-      case VADEventType.initialized:
+    // Ignore unknown event types defensively.
+    if (event.type < 0 || event.type > VADEventType.VAD_EVENT_STOPPED.value) {
+      return;
+    }
+    switch (VADEventType.fromValue(event.type)) {
+      case VADEventType.VAD_EVENT_INITIALIZED:
         _eventController.add(const VadInitialized());
-      case VADEventType.speechStart:
+      case VADEventType.VAD_EVENT_SPEECH_START:
         _eventController.add(const VadSpeechStart());
-      case VADEventType.speechEnd:
+      case VADEventType.VAD_EVENT_SPEECH_END:
         final audioLength = event.speech_end_audio_length;
         final audioPtr = event.speech_end_audio_data;
         if (audioPtr != nullptr && audioLength > 0) {
@@ -486,7 +510,7 @@ class VadPlus {
             ),
           );
         }
-      case VADEventType.frameProcessed:
+      case VADEventType.VAD_EVENT_FRAME_PROCESSED:
         final frameLength = event.frame_length;
         final framePtr = event.frame_data;
         Float32List audioData;
@@ -506,11 +530,11 @@ class VadPlus {
             audioData: audioData,
           ),
         );
-      case VADEventType.realSpeechStart:
+      case VADEventType.VAD_EVENT_REAL_SPEECH_START:
         _eventController.add(const VadRealSpeechStart());
-      case VADEventType.misfire:
+      case VADEventType.VAD_EVENT_MISFIRE:
         _eventController.add(const VadMisfire());
-      case VADEventType.error:
+      case VADEventType.VAD_EVENT_ERROR:
         final messagePtr = event.error_message;
         final message = messagePtr != nullptr
             ? messagePtr.cast<Utf8>().toDartString()
@@ -518,7 +542,7 @@ class VadPlus {
         _eventController.add(
           VadError(message: message, code: event.error_code),
         );
-      case VADEventType.stopped:
+      case VADEventType.VAD_EVENT_STOPPED:
         _eventController.add(const VadStopped());
     }
   }

@@ -630,7 +630,7 @@ class VADHandleInternal {
     fileprivate func emitSpeechEnd() {
         // Keep audio up to the last voiced frame plus endSpeechPadFrames of
         // padding; the rest of the redemption-window silence is trimmed.
-        let endPadSamples = Int(config.endSpeechPadFrames) * Int(config.frameSamples)
+        let endPadSamples = max(0, Int(config.endSpeechPadFrames)) * Int(config.frameSamples)
         let keepSamples = min(speechBuffer.count, samplesAtLastVoice + endPadSamples)
         let finalBuffer = Array(speechBuffer.prefix(keepSamples))
         
