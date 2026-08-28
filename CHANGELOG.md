@@ -1,3 +1,7 @@
+## 0.3.1
+
+- Re-publish of 0.3.0 (no functional changes).
+
 ## 0.3.0
 
 - Fix pre-speech padding: segments now start with the full `preSpeechPadFrames` (~96 ms) of lead-in and no longer duplicate the triggering frame.
