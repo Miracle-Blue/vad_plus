@@ -31,7 +31,8 @@ class _HomeScreenState extends HomeScreenState {
       backgroundColor: Colors.grey[850],
       actions: [IconButton(icon: const Icon(Icons.delete_outline), onPressed: _clearLog, tooltip: 'Clear log')],
     ),
-    body: Column(
+    body: ListView(
+      shrinkWrap: true,
       children: [
         _StatusCard(
           isListening: _isListening,
@@ -53,7 +54,8 @@ class _HomeScreenState extends HomeScreenState {
         const SizedBox(height: 16),
         ElevatedButton(onPressed: _toggleMusic, child: const Text('Play/Stop Music')),
         const SizedBox(height: 16),
-        Expanded(
+        SizedBox(
+          height: 400,
           child: _RecordedVoicesPanel(
             voices: _recordedVoices,
             playingVoice: _playingVoice,
@@ -63,7 +65,7 @@ class _HomeScreenState extends HomeScreenState {
           ),
         ),
         const SizedBox(height: 8),
-        Expanded(child: _EventLogPanel(entries: _eventLog)),
+        SizedBox(height: 200, child: _EventLogPanel(entries: _eventLog)),
       ],
     ),
   );
@@ -230,7 +232,10 @@ class _RecordedVoicesPanel extends StatelessWidget {
               children: [
                 const Icon(Icons.record_voice_over, color: Colors.tealAccent, size: 20),
                 const SizedBox(width: 8),
-                const Text('Recorded Voices', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent)),
+                const Text(
+                  'Recorded Voices',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent),
+                ),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -370,7 +375,10 @@ class _EventLogPanel extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Event Log', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent)),
+        const Text(
+          'Event Log',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent),
+        ),
         const Divider(color: Colors.grey),
         Expanded(
           child: ListView.builder(

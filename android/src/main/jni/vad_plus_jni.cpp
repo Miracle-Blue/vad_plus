@@ -4,6 +4,9 @@
 #include <cstdlib>
 #include <pthread.h>
 #include <android/log.h>
+#include <chrono>
+#include <mutex>
+#include <vector>
 
 #define TAG "VadPlusJNI"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -57,6 +60,58 @@ static JavaVM *g_jvm = nullptr;
 static jclass g_handleManagerClass = nullptr;
 static jclass g_handleInternalClass = nullptr;
 static jclass g_configInternalClass = nullptr;
+
+// ============================================================================
+// Deferred Event Cleanup
+// ============================================================================
+//
+// NativeCallable.listener delivers callbacks asynchronously on the Dart event
+// loop, so an event and its payload must stay alive after callback() returns.
+// Mirroring the iOS implementation (which frees on a 0.5s/1.0s timer), events
+// are queued here and freed once their grace period has passed; the queue is
+// drained on every subsequent event and on vad_destroy.
+
+struct PendingEvent
+{
+    VADEventC *event;
+    std::chrono::steady_clock::time_point freeAfter;
+};
+
+static std::mutex g_pendingEventsMutex;
+static std::vector<PendingEvent> g_pendingEvents;
+
+static void freeEvent(VADEventC *event)
+{
+    delete[] event->frame_data;
+    delete[] event->speech_end_audio_data;
+    free(const_cast<char *>(event->error_message));
+    delete event;
+}
+
+static void freeExpiredEvents()
+{
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(g_pendingEventsMutex);
+    for (auto it = g_pendingEvents.begin(); it != g_pendingEvents.end();)
+    {
+        if (it->freeAfter <= now)
+        {
+            freeEvent(it->event);
+            it = g_pendingEvents.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
+static void scheduleEventFree(VADEventC *event, int graceMs)
+{
+    freeExpiredEvents();
+    std::lock_guard<std::mutex> lock(g_pendingEventsMutex);
+    g_pendingEvents.push_back({event, std::chrono::steady_clock::now() + std::chrono::milliseconds(graceMs)});
+}
 
 // ============================================================================
 // JNI OnLoad
@@ -257,8 +312,7 @@ Java_dev_miracle_vad_1plus_VADHandleInternal_nativeSendEvent(
 
     callback(event, userData);
 
-    // Schedule cleanup (in a real implementation, Dart should handle this)
-    // For now, we'll let Dart manage the memory through the callback contract
+    scheduleEventFree(event, 500);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -298,9 +352,7 @@ Java_dev_miracle_vad_1plus_VADHandleInternal_nativeSendFrameEvent(
 
     callback(event, userData);
 
-    // Note: frameCopy should be freed by Dart after processing
-    // For safety, schedule deletion after a delay
-    // In production, this should be managed more carefully
+    scheduleEventFree(event, 500);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -334,9 +386,7 @@ Java_dev_miracle_vad_1plus_VADHandleInternal_nativeSendSpeechEndEvent(
 
     callback(event, userData);
 
-    // Note: audioCopy should be freed by Dart after processing
-    // For safety, schedule deletion after a delay
-    // In production, this should be managed more carefully
+    scheduleEventFree(event, 1000);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -366,6 +416,8 @@ Java_dev_miracle_vad_1plus_VADHandleInternal_nativeSendErrorEvent(
     event->error_code = code;
 
     callback(event, userData);
+
+    scheduleEventFree(event, 500);
 }
 
 // ============================================================================
@@ -438,6 +490,8 @@ extern "C"
 
     __attribute__((visibility("default"))) void vad_destroy(void *handle)
     {
+        freeExpiredEvents();
+
         if (handle == nullptr)
             return;
 

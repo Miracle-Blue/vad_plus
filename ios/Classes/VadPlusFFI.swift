@@ -56,10 +56,13 @@ class VADHandleInternal {
     var speechBuffer: [Float] = []
     var preSpeechBuffer: [[Float]] = []
     var hasEmittedRealStart = false
-    
+    // speechBuffer size at the last non-silence frame — endSpeechPadFrames
+    // of padding is kept after this point when a segment is emitted
+    var samplesAtLastVoice = 0
+
     // Audio buffer for accumulating samples
     var audioBuffer: [Float] = []
-    
+
     // Audio engine for microphone capture
     var audioEngine: AVAudioEngine?
     var audioConverter: AVAudioConverter?
@@ -137,6 +140,7 @@ class VADHandleInternal {
         speechBuffer = []
         preSpeechBuffer = []
         hasEmittedRealStart = false
+        samplesAtLastVoice = 0
         audioBuffer = []
     }
     
@@ -561,28 +565,30 @@ class VADHandleInternal {
     // MARK: - VAD Logic
     
     private func processVADLogic(frame: [Float], probability: Float) {
-        preSpeechBuffer.append(frame)
-        if preSpeechBuffer.count > Int(config.preSpeechPadFrames) {
-            preSpeechBuffer.removeFirst()
-        }
-        
         if !isSpeaking {
             if probability >= config.positiveSpeechThreshold {
                 isSpeaking = true
                 speechFrameCount = 1
                 silenceFrameCount = 0
                 hasEmittedRealStart = false
-                
+
+                // Prepend the pre-speech ring (the frames before this one),
+                // then the triggering frame itself — no duplication.
                 for preFrame in preSpeechBuffer {
                     speechBuffer.append(contentsOf: preFrame)
                 }
                 speechBuffer.append(contentsOf: frame)
-                
+                samplesAtLastVoice = speechBuffer.count
+
                 sendEvent(type: .speechStart)
             }
         } else {
             speechBuffer.append(contentsOf: frame)
-            
+            if probability >= config.negativeSpeechThreshold {
+                // Not silence — the end pad counts from here
+                samplesAtLastVoice = speechBuffer.count
+            }
+
             if probability >= config.positiveSpeechThreshold {
                 speechFrameCount += 1
                 silenceFrameCount = 0
@@ -606,17 +612,27 @@ class VADHandleInternal {
                     silenceFrameCount = 0
                     speechBuffer = []
                     hasEmittedRealStart = false
+                    samplesAtLastVoice = 0
                 }
             }
+        }
+
+        // Ring of the frames preceding the current one — updated after the
+        // state machine so a new segment gets preSpeechPadFrames of true
+        // lead-in without duplicating the triggering frame.
+        preSpeechBuffer.append(frame)
+        if preSpeechBuffer.count > Int(config.preSpeechPadFrames) {
+            preSpeechBuffer.removeFirst()
         }
     }
     
     // fileprivate to allow access from vad_force_end_speech FFI function
     fileprivate func emitSpeechEnd() {
+        // Keep audio up to the last voiced frame plus endSpeechPadFrames of
+        // padding; the rest of the redemption-window silence is trimmed.
         let endPadSamples = Int(config.endSpeechPadFrames) * Int(config.frameSamples)
-        let totalSamples = speechBuffer.count
-        let keepSamples = max(0, totalSamples - endPadSamples)
-        let finalBuffer = Array(speechBuffer.prefix(keepSamples + endPadSamples))
+        let keepSamples = min(speechBuffer.count, samplesAtLastVoice + endPadSamples)
+        let finalBuffer = Array(speechBuffer.prefix(keepSamples))
         
         // Convert to PCM16
         storedSpeechEndPCM16 = finalBuffer.map { sample in
@@ -950,6 +966,7 @@ public func vad_force_end_speech(_ handle: UnsafeMutableRawPointer?) {
     h.silenceFrameCount = 0
     h.speechBuffer = []
     h.hasEmittedRealStart = false
+    h.samplesAtLastVoice = 0
 }
 
 @_cdecl("vad_is_speaking")

@@ -81,6 +81,9 @@ class VADHandleInternal {
     private var speechBuffer = mutableListOf<Float>()
     private var preSpeechBuffer = mutableListOf<FloatArray>()
     private var hasEmittedRealStart = false
+    // speechBuffer size at the last non-silence frame — endSpeechPadFrames
+    // of padding is kept after this point when a segment is emitted
+    private var samplesAtLastVoice = 0
     
     // Audio buffer for accumulating samples
     private var audioBuffer = mutableListOf<Float>()
@@ -120,6 +123,7 @@ class VADHandleInternal {
         speechBuffer.clear()
         preSpeechBuffer.clear()
         hasEmittedRealStart = false
+        samplesAtLastVoice = 0
         audioBuffer.clear()
     }
     
@@ -145,15 +149,17 @@ class VADHandleInternal {
             Log.d(TAG, "ONNX Runtime environment created successfully")
             
             // Find model path
-            val finalModelPath = when {
-                !modelPath.isNullOrEmpty() && File(modelPath).exists() -> {
-                    Log.d(TAG, "Using provided model path: $modelPath")
-                    modelPath
+            val finalModelPath = if (!modelPath.isNullOrEmpty()) {
+                if (!File(modelPath).exists()) {
+                    _lastError = "Model file not found at provided path: $modelPath"
+                    Log.e(TAG, _lastError)
+                    return -2
                 }
-                else -> {
-                    Log.d(TAG, "Extracting model from assets...")
-                    extractModelFromAssets(context)
-                }
+                Log.d(TAG, "Using provided model path: $modelPath")
+                modelPath
+            } else {
+                Log.d(TAG, "Extracting model from assets...")
+                extractModelFromAssets(context)
             }
             
             if (finalModelPath == null) {
@@ -203,30 +209,20 @@ class VADHandleInternal {
         
         for (modelName in modelNames) {
             try {
-                val assetManager = context.assets
-                val inputStream = assetManager.open(modelName)
-                
+                // Always overwrite the cached copy so a model bundled by a
+                // plugin update is never shadowed by a stale extraction.
                 val outputFile = File(context.cacheDir, modelName)
-                if (outputFile.exists()) {
-                    // Check if file is valid by comparing size
-                    if (outputFile.length() > 0) {
-                        if (config.isDebug) {
-                            Log.d(TAG, "Using cached model: ${outputFile.absolutePath}")
-                        }
-                        return outputFile.absolutePath
+                context.assets.open(modelName).use { inputStream ->
+                    FileOutputStream(outputFile).use { outputStream ->
+                        inputStream.copyTo(outputStream)
                     }
                 }
-                
-                FileOutputStream(outputFile).use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-                inputStream.close()
-                
+
                 if (config.isDebug) {
                     Log.d(TAG, "Extracted model to: ${outputFile.absolutePath}")
                 }
                 return outputFile.absolutePath
-                
+
             } catch (e: Exception) {
                 if (config.isDebug) {
                     Log.d(TAG, "Model $modelName not found in assets: ${e.message}")
@@ -437,28 +433,30 @@ class VADHandleInternal {
     // MARK: - VAD Logic
     
     private fun processVADLogic(frame: FloatArray, probability: Float) {
-        preSpeechBuffer.add(frame.clone())
-        if (preSpeechBuffer.size > config.preSpeechPadFrames) {
-            preSpeechBuffer.removeAt(0)
-        }
-        
         if (!_isSpeaking) {
             if (probability >= config.positiveSpeechThreshold) {
                 _isSpeaking = true
                 speechFrameCount = 1
                 silenceFrameCount = 0
                 hasEmittedRealStart = false
-                
+
+                // Prepend the pre-speech ring (the frames before this one),
+                // then the triggering frame itself — no duplication.
                 for (preFrame in preSpeechBuffer) {
                     speechBuffer.addAll(preFrame.toList())
                 }
                 speechBuffer.addAll(frame.toList())
-                
+                samplesAtLastVoice = speechBuffer.size
+
                 sendEvent(VADEventType.SPEECH_START)
             }
         } else {
             speechBuffer.addAll(frame.toList())
-            
+            if (probability >= config.negativeSpeechThreshold) {
+                // Not silence — the end pad counts from here
+                samplesAtLastVoice = speechBuffer.size
+            }
+
             if (probability >= config.positiveSpeechThreshold) {
                 speechFrameCount++
                 silenceFrameCount = 0
@@ -482,16 +480,26 @@ class VADHandleInternal {
                     silenceFrameCount = 0
                     speechBuffer.clear()
                     hasEmittedRealStart = false
+                    samplesAtLastVoice = 0
                 }
             }
+        }
+
+        // Ring of the frames preceding the current one — updated after the
+        // state machine so a new segment gets preSpeechPadFrames of true
+        // lead-in without duplicating the triggering frame.
+        preSpeechBuffer.add(frame.clone())
+        if (preSpeechBuffer.size > config.preSpeechPadFrames) {
+            preSpeechBuffer.removeAt(0)
         }
     }
     
     internal fun emitSpeechEnd() {
+        // Keep audio up to the last voiced frame plus endSpeechPadFrames of
+        // padding; the rest of the redemption-window silence is trimmed.
         val endPadSamples = config.endSpeechPadFrames * config.frameSamples
-        val totalSamples = speechBuffer.size
-        val keepSamples = maxOf(0, totalSamples - endPadSamples)
-        val finalBuffer = speechBuffer.take(keepSamples + endPadSamples)
+        val keepSamples = minOf(speechBuffer.size, samplesAtLastVoice + endPadSamples)
+        val finalBuffer = speechBuffer.take(keepSamples)
         
         // Convert to PCM16
         storedSpeechEndPCM16 = ShortArray(finalBuffer.size) { i ->
@@ -514,6 +522,7 @@ class VADHandleInternal {
         silenceFrameCount = 0
         speechBuffer.clear()
         hasEmittedRealStart = false
+        samplesAtLastVoice = 0
     }
     
     // MARK: - Event Sending (Native Callbacks)
