@@ -1,3 +1,8 @@
+## 0.2.1
+
+- Complete README: quick start, events, configuration, VAD algorithm, `processAudio` mode, per-platform permissions, architecture, and known limitations.
+- Restructure the example app into feature-based modules.
+
 ## 0.2.0
 
 - Require Dart SDK ^3.9.0

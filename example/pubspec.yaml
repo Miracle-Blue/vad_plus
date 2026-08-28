@@ -14,6 +14,8 @@ dependencies:
   vad_plus:
     path: ../
 
+  meta: any
+
   flutter_soloud: 3.4.10
   permission_handler: ^12.0.1
 
