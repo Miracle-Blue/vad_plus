@@ -680,13 +680,9 @@ class VADHandleInternal {
     
     // MARK: - Event Sending
     
-    private func sendEvent(type: VADEventTypeInternal) {
-        // Allocate event on the heap since NativeCallable.listener processes
-        // the callback asynchronously on the Dart event loop
-        let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
-        eventPtr.initialize(to: VADEventCStruct())
-        eventPtr.pointee.type = type.rawValue
-        
+    /// Hands the event to Dart, which frees it with vad_free_event once read.
+    /// NativeCallable.listener delivers it later, on the Dart event loop.
+    private func deliver(_ eventPtr: UnsafeMutablePointer<VADEventCStruct>) {
         // Safely invoke callback within serial queue to prevent race conditions
         // CRITICAL: The callback invocation MUST happen within the sync block
         // so that invalidateCallback() will wait for it to complete
@@ -698,27 +694,26 @@ class VADHandleInternal {
             didInvoke = true
         }
         
-        if didInvoke {
-            // Schedule cleanup after Dart has processed the event
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                eventPtr.deinitialize(count: 1)
-                eventPtr.deallocate()
-            }
-        } else {
-            // Callback was invalidated, clean up immediately
-            eventPtr.deinitialize(count: 1)
-            eventPtr.deallocate()
+        if !didInvoke {
+            // Callback was invalidated, so nothing else will free it
+            vad_free_event(eventPtr)
         }
     }
     
+    private func sendEvent(type: VADEventTypeInternal) {
+        let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
+        eventPtr.initialize(to: VADEventCStruct())
+        eventPtr.pointee.type = type.rawValue
+        
+        deliver(eventPtr)
+    }
+    
     private func sendFrameEvent(probability: Float, isSpeech: Bool, frame: [Float]) {
-        // Allocate frame data copy that persists until Dart processes the callback
         let frameCopy = UnsafeMutablePointer<Float>.allocate(capacity: frame.count)
         for (i, sample) in frame.enumerated() {
             frameCopy[i] = sample
         }
         
-        // Allocate event on the heap
         let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
         eventPtr.initialize(to: VADEventCStruct())
         eventPtr.pointee.type = VADEventTypeInternal.frameProcessed.rawValue
@@ -727,35 +722,15 @@ class VADHandleInternal {
         eventPtr.pointee.frame_data = UnsafePointer(frameCopy)
         eventPtr.pointee.frame_length = Int32(frame.count)
         
-        var didInvoke = false
-        callbackQueue.sync {
-            guard _callbackValid, let cb = _callback else { return }
-            let ud = _userData
-            cb(UnsafeRawPointer(eventPtr), ud)
-            didInvoke = true
-        }
-        
-        if didInvoke {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                frameCopy.deallocate()
-                eventPtr.deinitialize(count: 1)
-                eventPtr.deallocate()
-            }
-        } else {
-            frameCopy.deallocate()
-            eventPtr.deinitialize(count: 1)
-            eventPtr.deallocate()
-        }
+        deliver(eventPtr)
     }
     
     private func sendSpeechEndEvent(audioLength: Int32, durationMs: Int32) {
-        // Allocate audio data copy that persists until Dart processes the callback
         let audioCopy = UnsafeMutablePointer<Int16>.allocate(capacity: storedSpeechEndPCM16.count)
         for (i, sample) in storedSpeechEndPCM16.enumerated() {
             audioCopy[i] = sample
         }
         
-        // Allocate event on the heap
         let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
         eventPtr.initialize(to: VADEventCStruct())
         eventPtr.pointee.type = VADEventTypeInternal.speechEnd.rawValue
@@ -763,59 +738,19 @@ class VADHandleInternal {
         eventPtr.pointee.speech_end_duration_ms = durationMs
         eventPtr.pointee.speech_end_audio_data = UnsafePointer(audioCopy)
         
-        var didInvoke = false
-        callbackQueue.sync {
-            guard _callbackValid, let cb = _callback else { return }
-            let ud = _userData
-            cb(UnsafeRawPointer(eventPtr), ud)
-            didInvoke = true
-        }
-        
-        if didInvoke {
-            // Schedule cleanup after Dart has processed the event
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                audioCopy.deallocate()
-                eventPtr.deinitialize(count: 1)
-                eventPtr.deallocate()
-            }
-        } else {
-            // Callback was invalidated, clean up immediately
-            audioCopy.deallocate()
-            eventPtr.deinitialize(count: 1)
-            eventPtr.deallocate()
-        }
+        deliver(eventPtr)
     }
     
     private func sendErrorEvent(message: String, code: Int32) {
-        // Allocate error message copy
         let messageCopy = strdup(message)
         
-        // Allocate event on the heap
         let eventPtr = UnsafeMutablePointer<VADEventCStruct>.allocate(capacity: 1)
         eventPtr.initialize(to: VADEventCStruct())
         eventPtr.pointee.type = VADEventTypeInternal.error.rawValue
         eventPtr.pointee.error_code = code
         eventPtr.pointee.error_message = UnsafePointer(messageCopy)
         
-        var didInvoke = false
-        callbackQueue.sync {
-            guard _callbackValid, let cb = _callback else { return }
-            let ud = _userData
-            cb(UnsafeRawPointer(eventPtr), ud)
-            didInvoke = true
-        }
-        
-        if didInvoke {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                free(messageCopy)
-                eventPtr.deinitialize(count: 1)
-                eventPtr.deallocate()
-            }
-        } else {
-            free(messageCopy)
-            eventPtr.deinitialize(count: 1)
-            eventPtr.deallocate()
-        }
+        deliver(eventPtr)
     }
 }
 
@@ -944,6 +879,17 @@ public func vad_set_callback(
     guard let h = getHandle(handle) else { return }
     h.callback = callback
     h.userData = userData
+}
+
+@_cdecl("vad_free_event")
+public func vad_free_event(_ event: UnsafeMutableRawPointer?) {
+    guard let eventPtr = event?.assumingMemoryBound(to: VADEventCStruct.self) else { return }
+    
+    eventPtr.pointee.frame_data?.deallocate()
+    eventPtr.pointee.speech_end_audio_data?.deallocate()
+    free(UnsafeMutablePointer(mutating: eventPtr.pointee.error_message))
+    eventPtr.deinitialize(count: 1)
+    eventPtr.deallocate()
 }
 
 @_cdecl("vad_invalidate_callback")

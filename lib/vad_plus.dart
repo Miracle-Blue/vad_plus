@@ -270,9 +270,6 @@ class VadPlus {
       throw Exception('Failed to create VAD handle');
     }
 
-    // Set active instance for static callback
-    _activeInstance = this;
-
     // Set up callback
     _setupCallback();
 
@@ -377,23 +374,7 @@ class VadPlus {
     _isDisposed = true;
 
     stop();
-
-    // CRITICAL: Invalidate the callback on the native side FIRST
-    // This synchronously waits for any pending callbacks to complete
-    // and prevents new callbacks from being invoked
-    if (_handle != null) {
-      _bindings.vad_invalidate_callback(_handle!);
-    }
-
-    // Now it's safe to close the native callback since no more invocations
-    // will happen from the native side
-    _nativeCallback?.close();
-    _nativeCallback = null;
-
-    // Clear active instance if this is it
-    if (_activeInstance == this) {
-      _activeInstance = null;
-    }
+    _releaseCallback();
 
     // Clear previous instance reference if this is it
     if (_previousInstance == this) {
@@ -424,20 +405,34 @@ class VadPlus {
   /// Releases the handle and callback created by a failed [initialize] so the
   /// instance does not leak native resources and can be retried.
   void _abortFailedInitialize() {
-    // Same teardown order as dispose(): invalidate -> close -> destroy.
+    _releaseCallback();
     final handle = _handle;
-    if (handle != null) {
-      _bindings.vad_invalidate_callback(handle);
-    }
-    _nativeCallback?.close();
-    _nativeCallback = null;
     if (handle != null) {
       _bindings.vad_destroy(handle);
     }
     _handle = null;
-    if (_activeInstance == this) {
-      _activeInstance = null;
+  }
+
+  /// Stops native events and retires the callback.
+  ///
+  /// NativeCallable.close() drops whatever is still queued, and those events
+  /// would never be freed. So the callback closes itself instead, on reaching
+  /// the null event posted here: delivery is in order, so it comes last.
+  void _releaseCallback() {
+    // CRITICAL: Invalidate the callback on the native side FIRST
+    // This synchronously waits for any pending callbacks to complete
+    // and prevents new callbacks from being invoked
+    final handle = _handle;
+    if (handle != null) {
+      _bindings.vad_invalidate_callback(handle);
     }
+
+    final callback = _nativeCallback;
+    _nativeCallback = null;
+    callback?.nativeFunction.asFunction<DartVADEventCallbackFunction>()(
+      nullptr,
+      nullptr,
+    );
   }
 
   String _getLastError() {
@@ -452,37 +447,32 @@ class VadPlus {
     // Using listener so the callback can be invoked from any thread (including
     // the native audio processing thread). The callback will be scheduled on
     // the Dart event loop.
-    _nativeCallback = NativeCallable<VADEventCallbackFunction>.listener(
-      _onNativeEvent,
-    );
+    late final NativeCallable<VADEventCallbackFunction> callback;
+    callback = NativeCallable<VADEventCallbackFunction>.listener((
+      Pointer<VADEvent> eventPtr,
+      Pointer<Void> userData,
+    ) {
+      // Posted by _releaseCallback() after native's last event
+      if (eventPtr == nullptr) {
+        callback.close();
+        return;
+      }
+
+      // Each event is ours to free, read or not. Those arriving after
+      // _releaseCallback() belong to a VAD that is gone, so they are dropped.
+      try {
+        if (identical(_nativeCallback, callback)) {
+          _processNativeEvent(eventPtr.ref);
+        }
+      } finally {
+        _bindings.vad_free_event(eventPtr);
+      }
+    });
+    _nativeCallback = callback;
 
     // Register the callback with the native handle
-    _bindings.vad_set_callback(
-      _handle!,
-      _nativeCallback!.nativeFunction,
-      nullptr,
-    );
+    _bindings.vad_set_callback(_handle!, callback.nativeFunction, nullptr);
   }
-
-  /// Static callback handler that receives events from native code.
-  /// Called synchronously from the native side (via DispatchQueue.main).
-  static void _onNativeEvent(
-    Pointer<VADEvent> eventPtr,
-    Pointer<Void> userData,
-  ) {
-    final instance = _activeInstance;
-    if (instance == null || eventPtr == nullptr) return;
-
-    // Check if instance is disposed to avoid processing stale events
-    if (instance._isDisposed) return;
-
-    // Read and copy data from the pointer immediately since we're called
-    // synchronously and the pointer is only valid during this call
-    final event = eventPtr.ref;
-    instance._processNativeEvent(event);
-  }
-
-  static VadPlus? _activeInstance;
 
   void _processNativeEvent(VADEvent event) {
     // Ignore unknown event types defensively.

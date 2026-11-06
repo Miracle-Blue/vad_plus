@@ -186,6 +186,8 @@ for (final Float32List chunk in myAudioSource) {
 }
 ```
 
+Events wait in native memory until Dart reads them, about 5 MB per minute of audio, so `await` between chunks when feeding very long files.
+
 For PCM16 sources, convert first with the top-level `pcm16ToFloat()` helper.
 
 Two methods matter most in this mode (they work in mic mode too):
@@ -219,7 +221,7 @@ Two methods matter most in this mode (they work in mic mode too):
 | Model location | Package resource bundle (`vad_plus_assets` under CocoaPods) | APK assets, copied to `cacheDir` at init |
 | Setup | SPM: a dynamic `vad-plus.framework` keeps the symbols. CocoaPods: the podspec preserves them (dead-code stripping disabled) | ContentProvider auto-captures the app context and loads the `.so`; JNI classes cached in `JNI_OnLoad` and kept by R8 rules shipped with the plugin |
 
-Events cross the boundary through a C callback into a `NativeCallable.listener`, which queues delivery onto the main Dart isolate — the UI thread never runs inference. On iOS the audio session is configured as `.playAndRecord` with `mixWithOthers`, `defaultToSpeaker`, and Bluetooth options at `initialize()` time, which is why the example app can keep music playing (and duck it) while the VAD listens.
+Events cross the boundary through a C callback into a `NativeCallable.listener`, which queues delivery onto the main Dart isolate — the UI thread never runs inference. Dart frees each event after reading it, so events stay valid however long the isolate is busy. On iOS the audio session is configured as `.playAndRecord` with `mixWithOthers`, `defaultToSpeaker`, and Bluetooth options at `initialize()` time, which is why the example app can keep music playing (and duck it) while the VAD listens.
 
 ## Notes & limitations
 

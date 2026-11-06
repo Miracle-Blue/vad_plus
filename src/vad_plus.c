@@ -69,6 +69,11 @@ FFI_PLUGIN_EXPORT void vad_set_callback(VADHandle *handle, VADEventCallback call
   (void)user_data;
 }
 
+FFI_PLUGIN_EXPORT void vad_free_event(const VADEvent *event)
+{
+  (void)event;
+}
+
 FFI_PLUGIN_EXPORT void vad_invalidate_callback(VADHandle *handle)
 {
   (void)handle;

@@ -2,7 +2,8 @@
 
 **Breaking:** now requires Flutter 3.44+, iOS 15.1+, and macOS 14+.
 
-- Fix Android release builds: R8 removed the classes reached only through JNI, so `initialize()` failed with `Failed to create VAD handle`. The plugin now ships keep rules.
+- Fix Android release builds: R8 removed the classes reached only through JNI, so `initialize()` failed with `Failed to create VAD handle`. The plugin now ships keep rules, which also stop ONNX Runtime errors from crashing release builds.
+- Fix lost, repeated, and phantom events when Dart reads them late, as with a `processAudio()` loop over a long file or a stalled main thread. Native code freed each event after 0.5 to 1 s whether or not it had been read. Dart now frees it after reading.
 - Add Swift Package Manager support on iOS and macOS. CocoaPods keeps working.
 - Support Android Gradle Plugin 9, with built-in Kotlin on or off.
 - Update ONNX Runtime on iOS and macOS to 1.24.x, the same line as Android, on both SPM and CocoaPods.

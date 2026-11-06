@@ -128,6 +128,19 @@ class VadPlusBindings {
         )
       >();
 
+  /// Free an event received by the callback, together with its audio or message
+  /// @param event Event to free
+  void vad_free_event(ffi.Pointer<VADEvent> event) {
+    return _vad_free_event(event);
+  }
+
+  late final _vad_free_eventPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<VADEvent>)>>(
+        'vad_free_event',
+      );
+  late final _vad_free_event = _vad_free_eventPtr
+      .asFunction<void Function(ffi.Pointer<VADEvent>)>();
+
   /// Invalidate the callback to prevent it from being invoked
   /// This MUST be called before closing the Dart NativeCallable to prevent crashes.
   /// Uses synchronous dispatch to ensure all pending callbacks complete first.
@@ -435,6 +448,8 @@ typedef DartVADEventCallbackFunction =
 
 /// Callback function type for VAD events
 /// Note: Event is passed by pointer for C/Swift FFI compatibility
+/// The callback owns the event, and must release it with vad_free_event() after
+/// reading it. It may do so at any later time, on any thread.
 typedef VADEventCallback =
     ffi.Pointer<ffi.NativeFunction<VADEventCallbackFunction>>;
 

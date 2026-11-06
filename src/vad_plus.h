@@ -106,6 +106,8 @@ typedef struct VADEvent
 
 /// Callback function type for VAD events
 /// Note: Event is passed by pointer for C/Swift FFI compatibility
+/// The callback owns the event, and must release it with vad_free_event() after
+/// reading it. It may do so at any later time, on any thread.
 typedef void (*VADEventCallback)(const VADEvent *event, void *user_data);
 
 // ============================================================================
@@ -143,6 +145,10 @@ FFI_PLUGIN_EXPORT int32_t vad_init(VADHandle *handle, const VADConfig *config, c
 /// @param callback Event callback function
 /// @param user_data User data passed to callback
 FFI_PLUGIN_EXPORT void vad_set_callback(VADHandle *handle, VADEventCallback callback, void *user_data);
+
+/// Free an event received by the callback, together with its audio or message
+/// @param event Event to free
+FFI_PLUGIN_EXPORT void vad_free_event(const VADEvent *event);
 
 /// Invalidate the callback to prevent it from being invoked
 /// This MUST be called before closing the Dart NativeCallable to prevent crashes.
