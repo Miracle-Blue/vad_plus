@@ -165,6 +165,7 @@ class VADHandleInternal {
     // Audio recording
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
+    private var releaseThread: Thread? = null
     private val isRecording = AtomicBoolean(false)
     
     // Callback - using native pointer for FFI
@@ -326,6 +327,10 @@ class VADHandleInternal {
         }
         
         try {
+            // Android below 10 allows one capture at a time, so let the last
+            // one finish. Only a start right after a stop waits here.
+            releaseThread?.join(1000)
+
             val channelConfig = AudioFormat.CHANNEL_IN_MONO
             val audioFormat = AudioFormat.ENCODING_PCM_16BIT
             val bufferSize = maxOf(
@@ -402,14 +407,23 @@ class VADHandleInternal {
         }
         recordingThread = null
         
-        try {
-            audioRecord?.stop()
-            audioRecord?.release()
-        } catch (e: Exception) {
-            // Ignore cleanup errors
+        // AudioRecord.stop() takes 300 ms or more, too long for Dart's thread.
+        // Nothing reads from it by now, so it can finish in the background.
+        audioRecord?.let { record ->
+            releaseThread = Thread {
+                try {
+                    record.stop()
+                    record.release()
+                } catch (e: Exception) {
+                    // Ignore cleanup errors
+                }
+            }.apply {
+                name = "VadPlusAudioRelease"
+                start()
+            }
         }
         audioRecord = null
-        
+
         resetStates()
         sendEvent(VADEventType.STOPPED)
     }
