@@ -372,10 +372,8 @@ Java_dev_miracle_vad_1plus_VADHandleInternal_nativeSendSpeechEndEvent(
     void *userData = reinterpret_cast<void *>(userDataPtr);
 
     // Copy audio data
-    jshort *audioElements = env->GetShortArrayElements(audioData, nullptr);
     int16_t *audioCopy = new int16_t[audioLength];
-    memcpy(audioCopy, audioElements, audioLength * sizeof(int16_t));
-    env->ReleaseShortArrayElements(audioData, audioElements, JNI_ABORT);
+    env->GetShortArrayRegion(audioData, 0, audioLength, audioCopy);
 
     VADEventC *event = new VADEventC();
     memset(event, 0, sizeof(VADEventC));
@@ -890,7 +888,7 @@ extern "C"
             return -1;
         }
 
-        jmethodID processMethod = env->GetMethodID(handleClass, "processAudioData", "([F)V");
+        jmethodID processMethod = env->GetMethodID(handleClass, "processNativeAudio", "(Ljava/nio/ByteBuffer;)V");
         if (processMethod == nullptr || env->ExceptionCheck())
         {
             clearException(env);
@@ -899,8 +897,11 @@ extern "C"
             return -1;
         }
 
-        jfloatArray floatArray = env->NewFloatArray(sample_count);
-        if (floatArray == nullptr || env->ExceptionCheck())
+        // No copy: the samples outlive this synchronous call, and Kotlin copies
+        // them into its frame buffer before returning.
+        jobject samplesBuffer = env->NewDirectByteBuffer(
+            const_cast<float *>(samples), static_cast<jlong>(sample_count) * sizeof(float));
+        if (samplesBuffer == nullptr || env->ExceptionCheck())
         {
             clearException(env);
             env->DeleteLocalRef(handleObj);
@@ -908,12 +909,10 @@ extern "C"
             return -1;
         }
 
-        env->SetFloatArrayRegion(floatArray, 0, sample_count, samples);
-
-        env->CallVoidMethod(handleObj, processMethod, floatArray);
+        env->CallVoidMethod(handleObj, processMethod, samplesBuffer);
         clearException(env);
 
-        env->DeleteLocalRef(floatArray);
+        env->DeleteLocalRef(samplesBuffer);
         env->DeleteLocalRef(handleObj);
         env->DeleteLocalRef(handleClass);
 

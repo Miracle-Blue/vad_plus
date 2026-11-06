@@ -12,8 +12,10 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.Buffer
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.FloatBuffer
-import java.nio.LongBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -53,20 +55,86 @@ object VADEventType {
 }
 
 /**
+ * Call clear(), flip() and position(Int) through this. FloatBuffer's own
+ * overloads only exist from API 34 and would crash on older Android (minSdk 24);
+ * Buffer's exist on every release.
+ */
+private val FloatBuffer.base: Buffer get() = this
+
+/**
+ * The model's tensors, created once per session over direct buffers so ONNX
+ * Runtime reads and writes them in place instead of copying every frame.
+ */
+private class ModelIO(env: OrtEnvironment, config: VADConfigInternal) : AutoCloseable {
+    private val input = floatBuffer(config.frameSamples + config.contextSize)
+    private val state = floatBuffer(STATE_LAYERS * STATE_HIDDEN_SIZE)
+    private val nextState = floatBuffer(STATE_LAYERS * STATE_HIDDEN_SIZE)
+    private val probability = floatBuffer(1)
+    private val sampleRate = directBytes(Long.SIZE_BYTES).asLongBuffer()
+        .put(0, config.sampleRate.toLong())
+
+    private val inputs = mapOf(
+        "input" to OnnxTensor.createTensor(env, input, longArrayOf(1, input.capacity().toLong())),
+        "sr" to OnnxTensor.createTensor(env, sampleRate, longArrayOf(1)),
+        "state" to OnnxTensor.createTensor(env, state, STATE_SHAPE)
+    )
+    private val outputs = mapOf(
+        "output" to OnnxTensor.createTensor(env, probability, longArrayOf(1, 1)),
+        "stateN" to OnnxTensor.createTensor(env, nextState, STATE_SHAPE)
+    )
+
+    /** Runs one frame and leaves its tail in [context] for the next one. */
+    fun run(session: OrtSession, context: FloatArray, frame: FloatArray): Float {
+        input.base.clear()
+        input.put(context).put(frame)
+
+        session.run(inputs, outputs).close()
+
+        state.base.clear()
+        nextState.base.clear()
+        state.put(nextState)
+
+        input.base.position(frame.size)
+        input.get(context)
+        return probability.get(0)
+    }
+
+    fun resetState() {
+        state.base.clear()
+        while (state.hasRemaining()) state.put(0f)
+    }
+
+    override fun close() {
+        (inputs.values + outputs.values).forEach { it.close() }
+    }
+
+    private companion object {
+        // v6 model: state tensor (2, 1, 128)
+        const val STATE_LAYERS = 2
+        const val STATE_HIDDEN_SIZE = 128
+        val STATE_SHAPE = longArrayOf(STATE_LAYERS.toLong(), 1, STATE_HIDDEN_SIZE.toLong())
+
+        fun directBytes(size: Int): ByteBuffer =
+            ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder())
+
+        fun floatBuffer(size: Int): FloatBuffer = directBytes(size * Float.SIZE_BYTES).asFloatBuffer()
+    }
+}
+
+/**
  * VAD Handle Internal Implementation
+ *
+ * Audio processing runs on the microphone thread and on Dart's thread, and it
+ * reuses its buffers, so everything touching them is synchronized.
  */
 class VADHandleInternal {
     // ONNX Runtime
     private var ortEnv: OrtEnvironment? = null
     private var ortSession: OrtSession? = null
+    private var modelIO: ModelIO? = null
     
     var config = VADConfigInternal()
         private set
-    
-    // VAD state for v6 model (2 * 1 * 128 = 256 floats)
-    private var state: FloatArray = FloatArray(0)
-    private val hiddenSize = 128
-    private val numLayers = 2
     
     // Context buffer for v6
     private var contextBuffer: FloatArray = FloatArray(0)
@@ -78,16 +146,22 @@ class VADHandleInternal {
     fun isSpeaking(): Boolean = _isSpeaking
     private var speechFrameCount = 0
     private var silenceFrameCount = 0
-    private var speechBuffer = mutableListOf<Float>()
-    private var preSpeechBuffer = mutableListOf<FloatArray>()
     private var hasEmittedRealStart = false
-    // speechBuffer size at the last non-silence frame — endSpeechPadFrames
-    // of padding is kept after this point when a segment is emitted
+    // pcmLength at the last non-silence frame — endSpeechPadFrames of padding
+    // is kept after this point when a segment is emitted
     private var samplesAtLastVoice = 0
-    
-    // Audio buffer for accumulating samples
-    private var audioBuffer = mutableListOf<Float>()
-    
+
+    // The frame being filled from incoming audio
+    private var frame = FloatArray(0)
+    private var frameFill = 0
+
+    // The current segment as PCM16. Between segments it holds just the last
+    // preSpeechPadFrames frames, which become the next segment's lead-in.
+    // ponytail: capacity stays at the longest segment so far, release it in
+    // resetStates if very long segments ever matter.
+    private var pcm = ShortArray(0)
+    private var pcmLength = 0
+
     // Audio recording
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
@@ -105,31 +179,35 @@ class VADHandleInternal {
     // JNI-compatible getter
     fun getLastError(): String = _lastError
     
-    // Stored speech end data
-    private var storedSpeechEndPCM16: ShortArray = ShortArray(0)
-    
     init {
         resetStates()
     }
     
+    @Synchronized
     fun resetStates() {
-        // v6: single state tensor (2, 1, 128) = 256 floats
-        state = FloatArray(numLayers * hiddenSize)
+        modelIO?.resetState()
         contextBuffer = FloatArray(config.contextSize)
+        frame = FloatArray(config.frameSamples)
+        frameFill = 0
         
         _isSpeaking = false
         speechFrameCount = 0
         silenceFrameCount = 0
-        speechBuffer.clear()
-        preSpeechBuffer.clear()
+        pcmLength = 0
         hasEmittedRealStart = false
         samplesAtLastVoice = 0
-        audioBuffer.clear()
     }
     
     fun destroy() {
         invalidateCallback()
         stopListening()
+        closeModel()
+    }
+
+    @Synchronized
+    private fun closeModel() {
+        modelIO?.close()
+        modelIO = null
         ortSession?.close()
         ortSession = null
         ortEnv?.close()
@@ -185,6 +263,7 @@ class VADHandleInternal {
             
             Log.d(TAG, "Creating ONNX session from model...")
             ortSession = ortEnv!!.createSession(finalModelPath, sessionOptions)
+            modelIO = ModelIO(ortEnv!!, config)
             Log.d(TAG, "ONNX session created successfully")
             
             // Log model info
@@ -272,6 +351,7 @@ class VADHandleInternal {
             
             recordingThread = Thread {
                 val buffer = ShortArray(config.frameSamples)
+                val samples = FloatBuffer.allocate(config.frameSamples)
                 
                 while (isRecording.get()) {
                     val readResult = audioRecord?.read(buffer, 0, buffer.size) ?: -1
@@ -283,11 +363,13 @@ class VADHandleInternal {
                         }
                         
                         // Convert PCM16 to float
-                        val floatData = FloatArray(readResult) { i ->
-                            buffer[i].toFloat() / 32768.0f
+                        samples.base.clear()
+                        for (i in 0 until readResult) {
+                            samples.put(buffer[i].toFloat() / 32768.0f)
                         }
+                        samples.base.flip()
                         
-                        processAudioData(floatData)
+                        processAudioData(samples)
                     }
                 }
             }.apply {
@@ -352,13 +434,22 @@ class VADHandleInternal {
     
     // MARK: - Audio Processing
     
-    fun processAudioData(data: FloatArray) {
-        audioBuffer.addAll(data.toList())
-        
-        while (audioBuffer.size >= config.frameSamples) {
-            val frame = audioBuffer.take(config.frameSamples).toFloatArray()
-            repeat(config.frameSamples) { audioBuffer.removeAt(0) }
-            processFrame(frame)
+    /** JNI entry for vad_process_audio: [samples] wraps Dart's native floats. */
+    fun processNativeAudio(samples: ByteBuffer) {
+        processAudioData(samples.order(ByteOrder.nativeOrder()).asFloatBuffer())
+    }
+
+    @Synchronized
+    fun processAudioData(samples: FloatBuffer) {
+        while (samples.hasRemaining()) {
+            val count = minOf(samples.remaining(), frame.size - frameFill)
+            samples.get(frame, frameFill, count)
+            frameFill += count
+
+            if (frameFill == frame.size) {
+                frameFill = 0
+                processFrame(frame)
+            }
         }
     }
     
@@ -381,58 +472,15 @@ class VADHandleInternal {
     
     private fun runInference(frame: FloatArray): Float {
         val session = ortSession ?: throw IllegalStateException("ONNX session not initialized")
-        val env = ortEnv ?: throw IllegalStateException("ONNX environment not initialized")
-        
-        // Prepare input with context - shape [1, frameSamples + contextSize]
-        val inputSize = config.frameSamples + config.contextSize
-        val inputWithContext = FloatArray(inputSize)
-        System.arraycopy(contextBuffer, 0, inputWithContext, 0, config.contextSize)
-        System.arraycopy(frame, 0, inputWithContext, config.contextSize, config.frameSamples)
-        
-        val inputShape = longArrayOf(1, inputSize.toLong())
-        val inputTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(inputWithContext), inputShape)
-        
-        // Prepare sample rate tensor - shape [1]
-        val srTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(config.sampleRate.toLong())), longArrayOf(1))
-        
-        // Prepare state tensor - shape [2, 1, 128]
-        val stateShape = longArrayOf(numLayers.toLong(), 1, hiddenSize.toLong())
-        val stateTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(state), stateShape)
-        
-        val inputs = mapOf(
-            "input" to inputTensor,
-            "sr" to srTensor,
-            "state" to stateTensor
-        )
-        
-        val outputs = session.run(inputs)
-        
-        // Get output probability
-        val outputTensor = outputs.get("output").get() as OnnxTensor
-        val outputBuffer = outputTensor.floatBuffer
-        val probability = outputBuffer.get(0)
-        
-        // Update state
-        val stateOutput = outputs.get("stateN").get() as OnnxTensor
-        val stateBuffer = stateOutput.floatBuffer
-        stateBuffer.get(state)
-        
-        // Update context buffer
-        val startIndex = inputWithContext.size - config.contextSize
-        System.arraycopy(inputWithContext, startIndex, contextBuffer, 0, config.contextSize)
-        
-        // Close tensors
-        inputTensor.close()
-        srTensor.close()
-        stateTensor.close()
-        outputs.close()
-        
-        return probability
+        val io = modelIO ?: throw IllegalStateException("ONNX session not initialized")
+        return io.run(session, contextBuffer, frame)
     }
     
     // MARK: - VAD Logic
     
     private fun processVADLogic(frame: FloatArray, probability: Float) {
+        appendPcm(frame)
+
         if (!_isSpeaking) {
             if (probability >= config.positiveSpeechThreshold) {
                 _isSpeaking = true
@@ -440,21 +488,15 @@ class VADHandleInternal {
                 silenceFrameCount = 0
                 hasEmittedRealStart = false
 
-                // Prepend the pre-speech ring (the frames before this one),
-                // then the triggering frame itself — no duplication.
-                for (preFrame in preSpeechBuffer) {
-                    speechBuffer.addAll(preFrame.toList())
-                }
-                speechBuffer.addAll(frame.toList())
-                samplesAtLastVoice = speechBuffer.size
+                // pcm already holds the lead-in followed by this frame
+                samplesAtLastVoice = pcmLength
 
                 sendEvent(VADEventType.SPEECH_START)
             }
         } else {
-            speechBuffer.addAll(frame.toList())
             if (probability >= config.negativeSpeechThreshold) {
                 // Not silence — the end pad counts from here
-                samplesAtLastVoice = speechBuffer.size
+                samplesAtLastVoice = pcmLength
             }
 
             if (probability >= config.positiveSpeechThreshold) {
@@ -478,19 +520,33 @@ class VADHandleInternal {
                     _isSpeaking = false
                     speechFrameCount = 0
                     silenceFrameCount = 0
-                    speechBuffer.clear()
                     hasEmittedRealStart = false
                     samplesAtLastVoice = 0
                 }
             }
         }
 
-        // Ring of the frames preceding the current one — updated after the
-        // state machine so a new segment gets preSpeechPadFrames of true
-        // lead-in without duplicating the triggering frame.
-        preSpeechBuffer.add(frame.clone())
-        if (preSpeechBuffer.size > config.preSpeechPadFrames) {
-            preSpeechBuffer.removeAt(0)
+        if (!_isSpeaking) trimToLeadIn()
+    }
+
+    private fun appendPcm(samples: FloatArray) {
+        val newLength = pcmLength + samples.size
+        if (newLength > pcm.size) {
+            pcm = pcm.copyOf(maxOf(newLength, pcm.size * 2))
+        }
+        for (i in samples.indices) {
+            val clamped = samples[i].coerceIn(-1.0f, 1.0f)
+            pcm[pcmLength + i] = (clamped * 32767).toInt().toShort()
+        }
+        pcmLength = newLength
+    }
+
+    /** Keeps only the last preSpeechPadFrames frames of pcm. */
+    private fun trimToLeadIn() {
+        val keep = maxOf(0, config.preSpeechPadFrames) * config.frameSamples
+        if (pcmLength > keep) {
+            System.arraycopy(pcm, pcmLength - keep, pcm, 0, keep)
+            pcmLength = keep
         }
     }
     
@@ -498,31 +554,24 @@ class VADHandleInternal {
         // Keep audio up to the last voiced frame plus endSpeechPadFrames of
         // padding; the rest of the redemption-window silence is trimmed.
         val endPadSamples = maxOf(0, config.endSpeechPadFrames) * config.frameSamples
-        val keepSamples = minOf(speechBuffer.size, samplesAtLastVoice + endPadSamples)
-        val finalBuffer = speechBuffer.take(keepSamples)
+        val keepSamples = minOf(pcmLength, samplesAtLastVoice + endPadSamples)
+        val durationMs = (keepSamples.toDouble() / config.sampleRate * 1000).toInt()
         
-        // Convert to PCM16
-        storedSpeechEndPCM16 = ShortArray(finalBuffer.size) { i ->
-            val clamped = finalBuffer[i].coerceIn(-1.0f, 1.0f)
-            (clamped * 32767).toInt().toShort()
-        }
-        
-        val durationMs = (finalBuffer.size.toDouble() / config.sampleRate * 1000).toInt()
-        
-        sendSpeechEndEvent(storedSpeechEndPCM16.size, durationMs)
+        sendSpeechEndEvent(keepSamples, durationMs)
     }
     
+    @Synchronized
     fun forceEndSpeech() {
-        if (_isSpeaking && speechBuffer.isNotEmpty() && speechFrameCount >= config.minSpeechFrames) {
+        if (_isSpeaking && speechFrameCount >= config.minSpeechFrames) {
             emitSpeechEnd()
         }
         
         _isSpeaking = false
         speechFrameCount = 0
         silenceFrameCount = 0
-        speechBuffer.clear()
         hasEmittedRealStart = false
         samplesAtLastVoice = 0
+        trimToLeadIn()
     }
     
     // MARK: - Event Sending (Native Callbacks)
@@ -552,7 +601,7 @@ class VADHandleInternal {
         
         callbackLock.withLock {
             if (callbackValid.get() && callbackPtr != 0L) {
-                nativeSendSpeechEndEvent(callbackPtr, userDataPtr, storedSpeechEndPCM16, audioLength, durationMs)
+                nativeSendSpeechEndEvent(callbackPtr, userDataPtr, pcm, audioLength, durationMs)
             }
         }
     }

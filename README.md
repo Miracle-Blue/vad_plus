@@ -23,10 +23,10 @@ The ONNX model (~2.3 MB) is bundled with the plugin, inference runs on native th
 | Platform | Minimum | Inference runtime | Notes |
 |---|---|---|---|
 | Android | minSdk 24 | ONNX Runtime Android 1.24.1 | ABIs: armeabi-v7a, arm64-v8a, x86, x86_64; 16 KB page-size ready |
-| iOS | 15.0 | onnxruntime-objc 1.18.x | model ships in the `vad_plus_assets` resource bundle |
-| macOS | 13.4 | onnxruntime-objc 1.18.x | model ships in the `vad_plus_assets` resource bundle |
+| iOS | 15.1 | ONNX Runtime 1.24.x | Swift Package Manager or CocoaPods; the model ships in the package's resource bundle |
+| macOS | 14.0 | ONNX Runtime 1.24.x | Swift Package Manager or CocoaPods; the model ships in the package's resource bundle |
 
-Web, Windows, and Linux are not supported. Inference is CPU-only on every platform (no CoreML / NNAPI / GPU).
+Requires Flutter 3.44 or later. Web, Windows, and Linux are not supported. Inference is CPU-only on every platform (no CoreML / NNAPI / GPU).
 
 ## Installation
 
@@ -213,11 +213,11 @@ Two methods matter most in this mode (they work in mic mode too):
 
 | | Apple (iOS / macOS) | Android |
 |---|---|---|
-| Implementation | Swift, exported as C symbols via `@_cdecl`, statically linked (`DynamicLibrary.process()`) | Kotlin behind a JNI bridge (`libvad_plus.so`) |
-| Inference | ONNX Runtime (onnxruntime-objc 1.18.x), CPU | ONNX Runtime Android 1.24.1 (Maven), CPU |
+| Implementation | Swift, exported as C symbols via `@_cdecl` and found with `DynamicLibrary.process()` | Kotlin behind a JNI bridge (`libvad_plus.so`) |
+| Inference | ONNX Runtime 1.24.x (`onnxruntime-swift-package-manager` or `onnxruntime-objc`), CPU | ONNX Runtime Android 1.24.1 (Maven), CPU |
 | Mic capture | `AVAudioEngine` input tap; auto resample/downmix to mono at `sampleRate` | `AudioRecord` on a dedicated thread, raw `MIC` source |
-| Model location | `vad_plus_assets` resource bundle | APK assets, copied to `cacheDir` at init |
-| Setup | podspec preserves symbols (dead-code stripping disabled) | ContentProvider auto-captures the app context and loads the `.so`; JNI classes cached in `JNI_OnLoad` |
+| Model location | Package resource bundle (`vad_plus_assets` under CocoaPods) | APK assets, copied to `cacheDir` at init |
+| Setup | SPM: a dynamic `vad-plus.framework` keeps the symbols. CocoaPods: the podspec preserves them (dead-code stripping disabled) | ContentProvider auto-captures the app context and loads the `.so`; JNI classes cached in `JNI_OnLoad` and kept by R8 rules shipped with the plugin |
 
 Events cross the boundary through a C callback into a `NativeCallable.listener`, which queues delivery onto the main Dart isolate — the UI thread never runs inference. On iOS the audio session is configured as `.playAndRecord` with `mixWithOthers`, `defaultToSpeaker`, and Bluetooth options at `initialize()` time, which is why the example app can keep music playing (and duck it) while the VAD listens.
 

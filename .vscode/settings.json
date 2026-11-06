@@ -1,5 +1,4 @@
 {
-    "cSpell.words": [
-        "Silero"
-    ]
+  "cSpell.words": ["Silero"],
+  "cmake.sourceDirectory": "${workspaceFolder}/src"
 }

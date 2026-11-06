@@ -1,6 +1,10 @@
 import Foundation
 import AVFoundation
+#if SWIFT_PACKAGE
+import OnnxRuntimeBindings
+#else
 import onnxruntime_objc
+#endif
 
 // MARK: - VAD Configuration (matching C struct)
 
@@ -187,15 +191,18 @@ class VADHandleInternal {
             print("VadPlus: Model loaded from \(finalModelPath)")
         }
         
-        // Pre-configure audio session and engine for faster startup
+        // Pre-configure audio session and engine for faster startup.
+        // Not on macOS: touching inputNode this early can trigger the mic prompt.
+        #if os(iOS)
         try preconfigureAudio()
+        #endif
         
         sendEvent(type: .initialized)
     }
     
+    #if os(iOS)
     /// Pre-configures audio session and engine during initialization for faster start
     private func preconfigureAudio() throws {
-        #if os(iOS)
         if !isAudioSessionConfigured {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(
@@ -212,7 +219,6 @@ class VADHandleInternal {
                 print("VadPlus: Audio session pre-configured")
             }
         }
-        #endif
         
         // Pre-create audio engine and format
         if audioEngine == nil {
@@ -243,9 +249,21 @@ class VADHandleInternal {
             }
         }
     }
+    #endif
     
     private func findBundledModel() -> String? {
         let modelNames = ["silero_vad_v6", "silero_vad"]
+        
+        #if SWIFT_PACKAGE
+        for name in modelNames {
+            if let path = Bundle.module.path(forResource: name, ofType: "onnx") {
+                if config.isDebug {
+                    print("VadPlus: Found model in package bundle: \(path)")
+                }
+                return path
+            }
+        }
+        #endif
         
         // Try main bundle
         for name in modelNames {
@@ -319,11 +337,19 @@ class VADHandleInternal {
             }
         }
         
-        // Try Frameworks directory (iOS app structure)
+        // Try Frameworks directory (macOS/iOS app structure)
+        #if os(macOS)
+        let frameworkPaths = [
+            "Contents/Frameworks/vad_plus.framework/Resources",
+            "Contents/Frameworks/vad_plus.framework/Versions/A/Resources",
+            "Contents/Resources"
+        ]
+        #else
         let frameworkPaths = [
             "Frameworks/vad_plus.framework",
             "Frameworks/App.framework/flutter_assets/packages/vad_plus/onnx"
         ]
+        #endif
         
         for frameworkPath in frameworkPaths {
             for name in modelNames {
@@ -455,8 +481,15 @@ class VADHandleInternal {
         
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
+        #if os(macOS)
+        // macOS builds a fresh engine for every start
+        audioEngine = nil
+        audioConverter = nil
+        outputFormat = nil
+        #else
         // Keep audioEngine, audioConverter, outputFormat for faster restart
         // They will be recreated if needed in startListening
+        #endif
         
         resetStates()
         

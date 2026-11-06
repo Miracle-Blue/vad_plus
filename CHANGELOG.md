@@ -1,3 +1,14 @@
+## 0.4.0
+
+**Breaking:** now requires Flutter 3.44+, iOS 15.1+, and macOS 14+.
+
+- Fix Android release builds: R8 removed the classes reached only through JNI, so `initialize()` failed with `Failed to create VAD handle`. The plugin now ships keep rules.
+- Add Swift Package Manager support on iOS and macOS. CocoaPods keeps working.
+- Support Android Gradle Plugin 9, with built-in Kotlin on or off.
+- Update ONNX Runtime on iOS and macOS to 1.24.x, the same line as Android, on both SPM and CocoaPods.
+- Reduce Android Java heap allocation during audio processing by about 95%. Events and speech audio are unchanged.
+- Move the iOS and macOS sources into one shared `darwin/` directory.
+
 ## 0.3.1
 
 - Re-publish of 0.3.0 (no functional changes).

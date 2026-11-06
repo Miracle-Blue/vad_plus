@@ -1,10 +1,10 @@
 name: vad_plus
 description: "Silero VAD ONNX voice activity detection FFI plugin for Flutter."
-version: 0.3.1
+version: 0.4.0
 
-homepage: https://github.com/Miracle-Blue/vad_plus
-repository: https://github.com/Miracle-Blue/vad_plus
-issue_tracker: https://github.com/Miracle-Blue/vad_plus/issues
+homepage: https://github.com/gthe-miracle/vad_plus
+repository: https://github.com/gthe-miracle/vad_plus
+issue_tracker: https://github.com/gthe-miracle/vad_plus/issues
 
 platforms:
   android:
@@ -13,7 +13,7 @@ platforms:
 
 environment:
   sdk: ^3.9.0
-  flutter: ">=3.3.0"
+  flutter: ">=3.44.0"
 
 dependencies:
   flutter:
@@ -36,5 +36,7 @@ flutter:
         ffiPlugin: true
       ios:
         ffiPlugin: true
+        sharedDarwinSource: true
       macos:
         ffiPlugin: true
+        sharedDarwinSource: true
